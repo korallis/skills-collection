@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+for argument in "$@"; do
+  case "$argument" in
+    --permission-mode | --permission-mode=* | --always-approve | --always-approve=* | \
+      --yolo | --yolo=* | --model | --model=* | -m | -m* | \
+      --reasoning-effort | --reasoning-effort=* | --effort | --effort=* | \
+      --output-format | --output-format=* | --include-partial-messages | \
+      --max-turns | --max-turns=* | --agent | --agent=* | --agents | --agents=* | \
+      --tools | --tools=* | --disallowed-tools | --disallowed-tools=* | \
+      --allow | --allow=* | --allowedTools | --allowedTools=* | \
+      --allowed-tools | --allowed-tools=* | --deny | --deny=* | \
+      --no-plan | --no-subagents | --disable-web-search)
+      echo "lee-grok-review: the fixed review profile owns '$argument'; remove it" >&2
+      exit 64
+      ;;
+  esac
+done
+
+export GROK_MEMORY=0
+
+exec grok \
+  --always-approve \
+  --model grok-4.6 \
+  --reasoning-effort low \
+  --output-format streaming-messages-json \
+  --include-partial-messages \
+  --max-turns 1 \
+  --no-plan \
+  --no-subagents \
+  --disable-web-search \
+  --disallowed-tools 'read_file,grep,list_dir,run_terminal_cmd,run_terminal_command,search_replace,write_file,web_search,web_fetch,Agent,todo_write,scheduler_create,scheduler_delete,scheduler_list,monitor,search_tool,use_tool,workflow,enter_plan_mode,exit_plan_mode,ask_user_question,image_gen,image_edit,image_to_video,reference_to_video,write' \
+  "$@"

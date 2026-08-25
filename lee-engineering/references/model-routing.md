@@ -179,6 +179,45 @@ Only locally launched interactive/headless modes acting on the controlled checko
 Hosted/background workspace delegation, provider-managed VMs, remote PR agents, cloud sessions, and
 any tool that can push or write outside the local checkout are prohibited.
 
+### Grok approve-mode invariant
+
+Every direct Grok CLI launch MUST use the installed `lee-grok` wrapper. The wrapper injects
+`--always-approve` and rejects `--permission-mode` and a caller-supplied `--always-approve`. Agents
+MUST NOT call the underlying `grok` binary directly. The user-level Grok configuration MUST also
+contain exactly this setting:
+
+```toml
+[ui]
+permission_mode = "always-approve"
+```
+
+Before admitting a Grok route in a new environment, run the installed
+`lee-engineering/scripts/sync_grok_harness.py verify --json`. A missing wrapper, configuration drift,
+or skill digest mismatch makes the route `unavailable`; do not improvise another permission mode.
+In particular, Grok's `--permission-mode acceptEdits` is forbidden: Grok CLI 1.0.5 returned
+`stopReason: cancelled` before its first edit tool call under that mode, while the same fixed probe
+completed with `--always-approve`.
+
+For a fixed-artifact, read-only Grok review, use `lee-grok-review`. It pins Grok 4.6 at low reasoning,
+keeps approve mode active, disables memory, planning, subagents, web access, and built-in tools, limits
+the run to one turn, and emits streaming Messages JSON. Split a large artifact into named immutable
+slices with the whole-artifact fingerprint in every packet. Do not use a short watchdog around
+non-streaming `json`: Grok 4.6 can stream reasoning for minutes on a large patch before producing its
+final result, which is active inference rather than quota exhaustion or a permission deadlock. Use
+`lee-grok` directly when a Grok worker needs tools or deeper reasoning.
+
+Every Cursor Agent route backed by Grok MUST use the installed `lee-cursor-grok` wrapper. It pins
+Grok 4.6 and injects `--force`, the Cursor approve-mode equivalent, while rejecting caller-supplied
+model, mode, force, yolo, and auto-review flags. Cursor-backed Grok remains a distinct harness
+admission and MUST pass a fixed one-edit tool probe before authoring. A direct Grok pass does not
+prove the Cursor tool bridge.
+
+Approve mode changes tool-confirmation behavior only. It MUST NOT expand the packet's writer lease,
+filesystem scope, data route, GitHub authority, network authority, or external side-effect authority.
+Use sandboxing, tool denials, a bounded checkout, and the task packet to enforce those boundaries.
+For installation and cross-environment verification, read
+[`grok-harness.md`](grok-harness.md).
+
 ## Receipts and handoffs
 
 Every worker and specialist returns a receipt containing:

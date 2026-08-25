@@ -20,6 +20,10 @@ implementation, or review.
    permission to push, open or merge a PR, deploy, message people, or mutate unrelated external state.
 5. Use local harness agents and locally launched coding CLIs only. Do not route work to cloud coding
    agents.
+6. Launch each Grok route through its matching installed wrapper: `lee-grok` for direct workers,
+   `lee-grok-review` for fixed-artifact review, and `lee-cursor-grok` for Cursor-backed workers. Before
+   admitting any Grok route, apply and verify the approve-mode invariant defined in
+   `references/model-routing.md`; a repository-local command must not override it.
 
 ## Route the work
 

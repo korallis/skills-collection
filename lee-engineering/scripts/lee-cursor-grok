@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+for argument in "$@"; do
+  case "$argument" in
+    --force | --force=* | --yolo | --yolo=* | --auto-review | --auto-review=* | \
+      --plan | --plan=* | --mode | --mode=* | --model | --model=* | -m | -m*)
+      echo "lee-cursor-grok: approve mode is fixed and the model is pinned by this wrapper; remove '$argument'" >&2
+      exit 64
+      ;;
+  esac
+done
+
+exec cursor-agent --force --model cursor-grok-4.6-xhigh "$@"

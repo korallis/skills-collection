@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+for argument in "$@"; do
+  case "$argument" in
+    --permission-mode | --permission-mode=* | \
+      --always-approve | --always-approve=* | --yolo | --yolo=*)
+      echo "lee-grok: approve mode is fixed by this wrapper; remove '$argument'" >&2
+      exit 64
+      ;;
+  esac
+done
+
+exec grok --always-approve "$@"
