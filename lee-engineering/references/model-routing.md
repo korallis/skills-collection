@@ -36,6 +36,14 @@ The uppercase words MUST, MUST NOT, SHOULD, and MAY are normative. Imperatives i
   are examples.
 - **Model family:** the resolved underlying provider/model lineage, not the CLI name. Cursor running
   Claude is Claude-family review, not a separate Cursor family.
+- **Capacity pool:** one provider meter shared by one or more model routes or harnesses. A model
+  catalog does not create separate capacity when its entries draw from the same subscription,
+  balance, rolling window, billing gate, or resource lease.
+- **Capacity snapshot:** current account-native evidence for every installed engineering harness,
+  grouped by capacity pool and recording applicable usage windows, reset times, blocks, and evidence
+  sources.
+- **Dispatch wave:** one or more packets selected from the same capacity snapshot. A later wave needs
+  a refreshed snapshot.
 
 Skill activation, model diversity, or a required review MUST NOT create new data-route, write, GitHub,
 deployment, or external-system authority. If the local-versus-cloud execution mode or actual model
@@ -71,8 +79,9 @@ data admission, local-execution, authority, writer-lease, or review gates.
 
 The coordinator MUST maintain a task ledger containing current intent, non-goals, authority
 boundaries, acceptance criteria, risk classification, dependency state, writer lease, dispatched
-packets, receipts, reviews, and unresolved decisions. Before dispatch and after any context
-compaction or handoff, it MUST re-read the applicable instructions and ledger.
+packets, capacity snapshots and allocations, receipts, reviews, and unresolved decisions. Before
+dispatch and after any context compaction or handoff, it MUST re-read the applicable instructions and
+ledger.
 
 Use an existing authorized durable surface for the ledger: the harness plan/goal, an issue or PR
 record, a checked-in task document when documentation is in scope, or an explicit handoff. Do not
@@ -126,11 +135,38 @@ installed and admitted families and give each safe, relevant family a distinct c
 lens. It MUST record unavailable, denied, timed-out, duplicate-family, or irrelevant routes. It MUST
 NOT commission interchangeable opinions merely to increase the model count.
 
+## Capacity-aware scheduling
+
+Before the first provider-backed dispatch in every non-trivial task, the coordinator MUST inventory
+every installed local engineering harness and capture a capacity snapshot. It MUST refresh that
+snapshot before each later dispatch wave. Follow the evidence collection, shared-pool mapping,
+scheduling order, and invalidation rules in
+[`capacity-routing.md`](capacity-routing.md).
+
+Apply authority, data-route admission, task fit, explicit user selection, execution mode, and writer
+lease as hard gates before considering capacity. Among routes that pass those gates, balance work by
+capacity pool rather than by CLI, catalog entry, or model name. Pace metered pools against their
+remaining headroom and reset horizon. Preserve enough different-family capacity for every known
+independent-review gate.
+
+An exhausted, authentication-blocked, billing-blocked, or stale pool is not dispatchable. A reset
+timestamp makes the prior snapshot stale; it does not prove that the route is available. Re-query the
+account or run the reference's bounded canary before reuse. When a provider does not expose remaining
+usage, send at most one packet from that pool in a wave. Choose the smallest packet that can satisfy
+the task, then refresh the pool's evidence before further fan-out.
+
+Capacity balancing MUST NOT force equal traffic, override a better task route, split one writer lease
+across processes, or consume a required review family on discretionary duplicate work. A quota,
+billing, or authentication failure invalidates the affected pool immediately and triggers
+rescheduling from the remaining admitted pools.
+
 ## Lifecycle states
 
 Track these explicit states in the task ledger:
 
 - Route: `proposed -> admitted | denied | unavailable`.
+- Capacity pool: `unknown -> available | constrained | exhausted | blocked`; after a reset or account
+  change, return to `unknown` until current evidence is captured.
 - Work: `packeted -> dispatched -> running -> receipt-received -> verified -> accepted | rejected`.
 - Exceptional work: `running -> timed-out | failed | cancelled | blocked-authority`.
 - Candidate import: `candidate-ready -> import-pending -> verifying -> accepted | reverted`.
@@ -151,6 +187,7 @@ Before dispatch, create a task packet with:
 - permitted read/write paths, external actions, and designated writer lease;
 - acceptance criteria and commands to run;
 - data classification and repository-approved provider route;
+- capacity-pool ID, capacity-snapshot timestamp, and the applicable usage windows;
 - deadline, bounded retry condition, and required return shape.
 
 An uncommitted candidate needs both its base commit and a content-addressed artifact manifest or
@@ -164,6 +201,7 @@ Before a provider-backed CLI enters `admitted`, record:
 - actual provider, model ID, family, mode, and reasoning level;
 - proof that the execution mode is locally launched rather than a cloud coding agent;
 - account/data-route retention, training-use, and ZDR facts from authoritative sources;
+- capacity-pool ID and current account availability evidence;
 - packet data class and exact permitted artifact;
 - read-only or writer permissions, writer lease if any, and timeout; and
 - the representative eval used for a non-default selection, if one exists.
@@ -223,6 +261,8 @@ For installation and cross-environment verification, read
 Every worker and specialist returns a receipt containing:
 
 - task ID, exact CLI/version/provider/model/family/mode, and whether it counted as independent;
+- capacity-pool ID, the snapshot observed at dispatch, and any quota, reset, billing, or
+  authentication update returned during the run;
 - base, artifact-snapshot inclusion method, and fingerprint inspected;
 - actual data route and retention terms applied;
 - files or contracts changed, if authorized;
@@ -240,6 +280,9 @@ over status chatter.
 Merge-critical, security-sensitive, high-risk, or contested work MUST receive fixed-artifact review
 from at least one admitted different model family. Give reviewers the same intent, fixed artifact,
 acceptance criteria, and evidence. The author model's self-review cannot satisfy this gate.
+
+Reserve the last available non-author family for this review before assigning discretionary duplicate
+work. Refresh its capacity evidence immediately before review dispatch.
 
 Review independence counts only when the resolved underlying family differs from the author's. If no
 admitted different-family route completes, set review to `unsatisfied`, stop publication/merge, and

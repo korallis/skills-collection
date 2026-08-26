@@ -32,6 +32,11 @@ For every non-trivial software task, read and follow the normative
 coordinator, supervisor, specialist-lead, worker, writer-lease, route-admission, lifecycle, receipt, and
 independent-review requirements. Do not replace its definitions with a CLI or vendor's terminology.
 
+Before the first provider-backed dispatch and before each later dispatch wave, read
+[`references/capacity-routing.md`](references/capacity-routing.md). Inventory every installed
+engineering harness, group routes by shared capacity pool, and schedule only from a current usage and
+reset snapshot.
+
 Use repository evaluations and concrete community evidence to form task-fit hypotheses, while using
 authoritative provider/tool documentation for route identity and data controls. The dated evidence
 register is non-normative. When broad multi-model coverage is explicitly requested, inventory all
