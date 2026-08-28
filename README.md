@@ -32,7 +32,7 @@ only for a harness you actually have:
 | `~/.claude/skills` | Claude Code, which does not read `~/.agents/skills` |
 | `~/.cursor/skills` | Cursor |
 | `~/.codex/skills` | Codex |
-| `~/.grok/skills`, `~/.gemini/skills`, `~/.factory/skills` | their harnesses |
+| `~/.grok/skills`, `~/.gemini/skills`, `~/.factory/skills`, `~/.t3/skills`, `~/.droid/skills` | their harnesses |
 
 Because they are symlinks to one directory, editing a skill changes it everywhere at once and no
 root can silently drift. `bin/agent-skills status` reports any root that has become a copy or points
@@ -54,7 +54,7 @@ Skills here never assume which models or CLIs exist. They scan.
 
 ```bash
 bin/agent-routes scan     # writes ~/.agents/routes.json
-bin/agent-routes show     # reprint the last scan
+bin/agent-roles apply     # assigns roles, writes routing + the harness's own config
 ```
 
 The scan probes the harness you are currently in first, then any vendor CLI on the machine, and
@@ -62,7 +62,17 @@ records every model the account can actually reach, its family, the provider met
 current usage where the source exposes it. A vendor CLI is a fallback: when it only duplicates a
 family the harness already reaches, the route is flagged rather than used.
 
-Adding a harness or CLI is one entry in `PROBES` in [`bin/agent-routes`](bin/agent-routes).
+`agent-roles` turns that scan into a role assignment — `plan`, `implement`, `review`, `scout`,
+`verify` — writing `~/.agents/routing.json` for any harness to read, and, on Oh My Pi, merging the
+result into `modelRoles` and `task.agentModelOverrides` through `omp config set`. `review` and
+`verify` are forced into a different model family from `implement`. Roles are an override layer: one
+with no assignment keeps the skill's own default, so nothing breaks when the file is absent.
+
+`link` also makes `CLAUDE.md` a symlink to `AGENTS.md`, so Claude Code finds the file it expects
+while there is still only one file to edit.
+
+Adding a harness or CLI is one entry in `PROBES` in [`bin/agent-routes`](bin/agent-routes); adding a
+harness config writer is one entry in `ADAPTERS` in [`bin/agent-roles`](bin/agent-roles).
 
 See [setup-lee-engineering](setup-lee-engineering/) for the guided version, invocable as
 `/setup-lee-engineering`.

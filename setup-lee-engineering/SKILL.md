@@ -1,105 +1,126 @@
 ---
 name: setup-lee-engineering
-description: Install this skills collection into every harness on this machine and discover which models the account can actually reach. Use for /setup-lee-engineering, "set up lee-engineering", "which models do I have", "scan my routes", or before any multi-model dispatch.
+description: Set up the agent skills collection for whatever harness you are in. Links the skills into every harness from one copy, scans which models the account can actually reach, assigns them to engineering roles, and writes the harness's own routing config. Use for /setup-lee-engineering, "set up lee-engineering", "which models do I have", "scan my routes", "configure my model routing", or before any multi-model dispatch.
 ---
 
 # Setup
 
-Two jobs: put the skills in one place every harness reads, then find out what models this account
-can actually reach. Both are scripts. Run them; do not predict their output.
-
-Everything lives in the skills-collection clone. Find it, and work from there:
+Three jobs, three scripts. Run them; do not predict their output.
 
 ```bash
-ls ~/.agents/skills/setup-lee-engineering   # a symlink points at the clone
+bin/agent-skills link      # one copy of the skills, linked into every harness
+bin/agent-routes scan      # which models this account can actually reach
+bin/agent-roles apply      # assign them to roles, and write the harness config
+```
+
+Everything lives in the skills-collection clone. Find it from any harness:
+
+```bash
 readlink -f ~/.agents/skills/setup-lee-engineering
 ```
 
+Report back: which roots were linked and whether any had drifted, which harness was detected and
+how, how many routes came from the harness versus a vendor CLI, the role assignment, and any gap.
+
 ## 1. One copy, many harnesses
 
-```bash
-bin/agent-skills status     # what each harness root points at
-bin/agent-skills link       # symlink every skill into every harness root found
-```
+`link` makes the clone the only copy on disk and symlinks it into every harness skill root present:
+`~/.agents/skills` (the cross-agent convention, read by Cursor, Codex and Gemini CLI),
+`~/.claude/skills` (Claude Code does not read the convention path), plus Cursor, Codex, Grok, Gemini,
+Factory, Droid and T3 roots when those harnesses exist.
 
-The clone is the only copy on disk. Every harness skill root becomes a symlink into it, so editing a
-skill changes it everywhere at once and no root can drift.
+`status` flags a root that drifted into a copy. `prune` clears the dangling links a renamed skill
+leaves behind.
 
-`status` reports `copy` or `linked-elsewhere` when a root has drifted. That is the failure this
-replaces: an agent reading a stale duplicate while you edit the original.
+`link` also makes `CLAUDE.md` a symlink to `AGENTS.md`, so Claude Code sees the file it looks for
+while there is still only one file to edit. Never edit `CLAUDE.md`; edit `AGENTS.md`. If the two
+already differ, the link is refused rather than clobbering either.
 
-Do not install this collection as a Cursor or Claude Code plugin. Plugin installs are per-harness
-caches, which is the duplication this avoids.
+Do not install this collection as a plugin. Cursor and Claude Code both cache a plugin per harness,
+which is the duplication this avoids.
 
-## 2. Scan the routes
+## 2. Scan what you can reach
 
-```bash
-bin/agent-routes scan       # probe and write ~/.agents/routes.json
-bin/agent-routes show       # reprint the last scan without probing
-```
-
-The scan answers one question: **which models can this account actually reach right now.** It
-probes the harness you are in first, then any vendor CLI on the machine, and writes every result to
-`~/.agents/routes.json`.
-
-Each route carries:
+`scan` probes the harness you are in first, then any vendor CLI or manifest on the machine, and
+writes `~/.agents/routes.json`. Each route carries:
 
 | Field | Meaning |
 | --- | --- |
-| `sourceKind` | `harness` for the harness you are in, `cli-fallback` for a vendor CLI |
-| `family` | model lineage derived from the model ID: what makes a review independent |
-| `pool` | the provider account meter that can stop it: what makes scheduling honest |
+| `sourceKind` | `harness` for the one you are in, `cli-fallback` for anything else |
+| `family` | model lineage from the model ID: what makes a review independent |
+| `pool` | the provider account meter: what makes scheduling honest |
 | `preferOver` | set when a CLI route duplicates a family the harness already reaches |
 
-## Read the scan, not your memory
+Read `status` per source before concluding anything: `ok`, `empty`, `no-api` (the tool publishes no
+model list), `failed`, `timeout`, `unavailable`. **A failure is not an absence.**
 
-- `routes.json` is the answer to "what can I run this on". An installed binary, a
-  vendor documentation table, a model name in a config file, and a remembered environment are all
-  inadmissible.
-- **A vendor CLI is a fallback.** When `preferOver` is set, the harness already reaches that family;
-  going out to the CLI adds a second data route and a second draw on the same meter and buys
-  nothing. Use a CLI only for a family or capability the harness genuinely cannot provide.
-- **Family and pool are independent.** One provider account often serves several families, and one
-  family is often reachable from several accounts. Check `families` in the scan before concluding a
-  model family is unavailable.
-- A pool with no usage numbers is `unknown`, not free. Send one small packet, then re-scan.
+Some harnesses publish no model list at all. The scan then emits one **live-session** route for the
+model you are already talking to, with `family: unknown`. Keep working on it. Do not leave a working
+session for a CLI just because the CLI produced a catalog.
 
-## Re-scan when
+## 3. Assign roles and write the config
+
+`agent-roles assign` picks a route per role and writes `~/.agents/routing.json` and
+`~/.agents/routing.md`. `agent-roles apply` does that and also writes the current harness's own role
+configuration when it has one.
+
+| Role | Used for |
+| --- | --- |
+| `plan` | architecture, design, hard judgment |
+| `implement` | writing and changing code |
+| `review` | independent review; forced into a different family from `implement` |
+| `scout` | cheap exploration and summarising |
+| `verify` | checking claims; also a different family from `implement` |
+
+Selection uses only what the scan carries plus vendor naming convention: harness before CLI, healthy
+pool before constrained, reasoning support, tier words (`nano`/`haiku`/`flash` small,
+`opus`/`pro`/`max` large), and version parsed from the model ID. Price is deliberately not a
+capability signal, because a legacy flagship is often the priciest entry in the catalog and the worst
+choice.
+
+Two rules hold everywhere:
+
+- **Never a model you cannot reach.** Only selectors present in the scan are ever written. A role
+  pointing at an unreachable model breaks every delegation that reads it.
+- **Override layer, inline fallbacks.** A role with no assignment keeps whatever default the skill
+  already uses, so nothing breaks when the file is missing or stale.
+
+### Harness adapters
+
+`apply` writes the harness's native config where one exists:
+
+- **Oh My Pi (`omp`)** — merges into `modelRoles` and `task.agentModelOverrides` through
+  `omp config set`, the supported mutation path. Roles it does not manage are preserved, the previous
+  values are saved to `~/.agents/backups/`, and the thinking level is chosen from the levels each
+  model actually supports: highest for a capability role, lowest for a cheap one.
+- **Any other harness** — no native role config, so the neutral `routing.json` is the contract and
+  skills read it directly. That is reported, not treated as a failure.
+
+### Pinning a role yourself
+
+The ranking is a heuristic and will sometimes be wrong. Pin a role in
+`~/.agents/roles.overrides.json` and it wins on every re-run:
+
+```json
+{ "review": "anthropic/claude-opus-5" }
+```
+
+A pin naming a model the scan did not find is ignored and reported.
+
+## Re-run when
 
 - a dispatch fails with an unknown model;
 - credentials, accounts, subscriptions, or the harness change;
-- the scan predates the current session;
-- a provider returns a quota, billing, or authentication error.
+- a provider returns a quota, billing, or authentication error;
+- you add a harness or a CLI.
 
-## When your harness publishes no model list
+Re-running is idempotent: `link` is a no-op when everything is linked, and `assign` overwrites the
+whole routing file so there is no accumulated state.
 
-Claude Code, Codex, Gemini CLI and opencode do not publish one. That is a fact about the tool, not
-evidence you have no models: you are demonstrably talking to one right now.
+## When nothing is found
 
-In that case the scan records the source as `status: no-api` and adds a single **live-session**
-route with `selector: <live session>` and `family: unknown`. Read it as: keep working on the model
-you are already on. Do not leave a working session to spawn a vendor CLI merely because the CLI is
-the only thing that produced a catalog.
+With no harness detected and no CLI listing models, report what was probed and stop. Do not fall back
+to assumption. If a harness was detected you always have at least the live-session route.
 
-`family: unknown` means the session's model cannot be named, so it cannot satisfy a review gate that
-requires a *different* family. For that gate, and only that gate, a CLI route is a legitimate
-fallback.
-
-Distinguish the `status` values before concluding anything:
-
-| Status | Meaning |
-| --- | --- |
-| `ok` | routes were listed |
-| `no-api` | the tool publishes no model list; absence of data, not absence of models |
-| `empty` | the tool listed nothing |
-| `failed` | the probe errored; treat as unknown, not as absence |
-| `timeout` | the probe hung; treat as unknown, not as absence |
-| `unavailable` | detected as the current harness, but its binary is not on `PATH` |
-
-## When the scan genuinely finds nothing
-
-With no harness detected and no CLI listing models, report what was probed and stop. Do not fall
-back to assumption. If a harness was detected, you always have at least the live-session route.
-
-Adding support for a harness or CLI is one entry in `PROBES` in `bin/agent-routes`. If a harness is
-missing, add it there rather than working around it in prose.
+Adding a harness or CLI is one entry in `PROBES` in `bin/agent-routes`. Add it there rather than
+working around it in prose.

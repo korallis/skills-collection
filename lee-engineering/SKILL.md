@@ -22,22 +22,27 @@ implementation, or review.
 
 ## Know your routes before you dispatch
 
-Never assume which models or CLIs exist. Scan.
+Never assume which models or CLIs exist. Scan, then use the roles that scan produced.
 
 ```bash
-bin/agent-routes scan     # or the setup-lee-engineering skill
+bin/agent-routes scan && bin/agent-roles apply   # or the setup-lee-engineering skill
 ```
 
-The scan writes `~/.agents/routes.json`: every model this account can reach, which harness or CLI
-reaches it, its family, its capacity pool, and current usage. Read that file before dispatching.
+`~/.agents/routing.json` names a model per role: `plan`, `implement`, `review`, `scout`, `verify`.
+Dispatch against those roles rather than naming a model. `review` and `verify` are guaranteed to sit
+in a different model family from `implement`, which is what makes a review independent.
+
+A role with no assignment keeps whatever default you would otherwise use, so a missing or stale
+routing file never breaks a dispatch. `~/.agents/routes.json` holds the full scan when you need the
+detail: families, capacity pools, and per-source status.
 
 Re-scan when a dispatch fails with an unknown model, when credentials or accounts change, or when the
-file predates this session. `bin/agent-routes show` prints the last scan without re-probing.
+scan predates this session.
 
-Some harnesses publish no model list. The scan then records `status: no-api` and emits one
-live-session route for the model you are already on: keep working there rather than leaving for a
-vendor CLI. A CLI is a fallback for a family or capability the harness cannot provide, not a
-replacement for a working session. `status: failed` or `timeout` means unknown, never absence.
+Some harnesses publish no model list. The scan then emits one live-session route for the model you
+are already on: keep working there rather than leaving for a vendor CLI. A CLI is a fallback for a
+family or capability the harness cannot provide, never a replacement for a working session.
+`status: failed` or `timeout` means unknown, never absence.
 
 If no scan is possible at all, say so and continue single-agent on the current model.
 

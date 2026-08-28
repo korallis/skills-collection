@@ -1,0 +1,670 @@
+#!/usr/bin/env python3
+"""Assign engineering roles to the models this account can actually reach.
+
+Reads the scan written by `agent-routes`, picks a route per role from what is
+actually available, and writes one neutral routing file every harness can read.
+`apply` additionally writes the current harness's own role configuration, when
+that harness has one.
+
+    agent-roles assign          choose routes and write ~/.agents/routing.{json,md}
+    agent-roles show            print the current assignment
+    agent-roles apply           also write the harness's native role config
+    agent-roles apply --dry-run show what would change, write nothing
+
+Two rules carried over from prior art, both load-bearing:
+
+- Never write a selector that is not in the detected set. A role pointing at a
+  model the user cannot reach breaks every delegation that reads it.
+- This is an override layer with inline fallbacks. A role with no assignment
+  keeps the skill's own default, so nothing breaks when the file is absent.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+SCHEMA_VERSION = 1
+
+# What the engineering skills actually need. Keep this small: every role here
+# must change a real dispatch decision.
+ROLES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "plan",
+        "purpose": "architecture, design, and hard judgment",
+        "needs_reasoning": True,
+        "prefer": "capability",
+    },
+    {
+        "id": "implement",
+        "purpose": "writing and changing code",
+        "needs_reasoning": True,
+        "prefer": "capability",
+    },
+    {
+        "id": "review",
+        "purpose": "independent review; must differ in family from implement",
+        "needs_reasoning": True,
+        "prefer": "capability",
+        "distinct_from": "implement",
+    },
+    {
+        "id": "scout",
+        "purpose": "cheap exploration, search, and summarising",
+        "needs_reasoning": False,
+        "prefer": "cheap",
+    },
+    {
+        "id": "verify",
+        "purpose": "checking claims against the artifact; differs from implement",
+        "needs_reasoning": True,
+        "prefer": "cheap",
+        "distinct_from": "implement",
+    },
+)
+
+POOL_RANK = {"available": 0, "constrained": 1, "unknown": 2, "exhausted": 3, "blocked": 4}
+
+
+def agents_home() -> Path:
+    root = os.environ.get("AGENT_SKILLS_HOME")
+    return Path(root).expanduser() if root else Path.home() / ".agents"
+
+
+def routes_path() -> Path:
+    override = os.environ.get("AGENT_ROUTES_FILE")
+    return Path(override).expanduser() if override else agents_home() / "routes.json"
+
+
+def routing_path() -> Path:
+    return agents_home() / "routing.json"
+
+
+def load_scan() -> dict[str, Any]:
+    path = routes_path()
+    if not path.is_file():
+        raise SystemExit(f"agent-roles: no scan at {path}; run: agent-routes scan")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------
+# Selection
+# --------------------------------------------------------------------------
+
+
+def pool_states(scan: dict[str, Any]) -> dict[str, str]:
+    """Worst known state per pool. An unmetered pool is unknown, not free."""
+    states: dict[str, str] = {}
+    for pool in scan.get("pools", []):
+        current = pool.get("poolState") or pool.get("state") or "unknown"
+        best = states.get(pool["poolId"])
+        if best is None or POOL_RANK[current] > POOL_RANK[best]:
+            states[pool["poolId"]] = current
+    return states
+
+
+def cost_of(route: dict[str, Any]) -> float:
+    cost = route.get("cost") or {}
+    output = cost.get("output")
+    return float(output) if isinstance(output, (int, float)) else 0.0
+
+
+# Vendor tier vocabulary. These are naming conventions, not model identities:
+# every major provider marks its small tier with one of the first set and its
+# large tier with one of the second. It is a heuristic, and it is overridable
+# per role in ~/.agents/roles.overrides.json.
+SMALL_TIER = ("mini", "nano", "haiku", "flash", "lite", "small", "tiny", "air", "spark")
+LARGE_TIER = ("opus", "max", "ultra", "heavy", "large", "pro", "sol", "terra")
+UNSTABLE = ("preview", "exp", "experimental", "beta", "alpha")
+
+# A version is a major, optionally followed by a minor written with either a
+# dot or a dash: `gpt-5.6`, `claude-opus-4-5`, and `claude-3-5-sonnet` are 5.6,
+# 4.5 and 3.5. Release stamps look like versions and are not, so they go first.
+VERSION = re.compile(r"(?<![0-9.])(\d+)(?:[.-](\d+))?(?![0-9])")
+DATE_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}|\d{8}|\d{6}")
+# Context and parameter markers look like a minor version and are not:
+# `claude-opus-5-1m` is version 5, not 5.1, and `llama-3.1-70b` is 3.1, not 70.
+SIZE_MARKER = re.compile(r"[-_]\d+(?:\.\d+)?[mkbt]\b")
+
+
+def version_of(model_id: str) -> float:
+    """Largest plausible version in the id, ignoring release stamps.
+
+    Orders newer models above older ones inside a family without naming any of
+    them.
+    """
+    stripped = SIZE_MARKER.sub(" ", DATE_STAMP.sub(" ", model_id.lower()))
+    versions = []
+    for major, minor in VERSION.findall(stripped):
+        value = float(f"{major}.{minor}") if minor else float(major)
+        if value < 100:
+            versions.append(value)
+    return max(versions, default=0.0)
+
+
+def tokens(model_id: str) -> set[str]:
+    """Split an id on every non-alphanumeric boundary and on digit runs.
+
+    Substring matching is not safe here: `mini` is inside `gemini` and
+    `minimax`, which silently classified every Gemini model as a small model.
+    """
+    return {part for part in re.split(r"[^a-z]+", model_id.lower()) if part}
+
+
+def tier(model_id: str) -> int:
+    """-1 small, 0 unmarked, 1 large."""
+    words = tokens(model_id)
+    if words & set(SMALL_TIER):
+        return -1
+    if words & set(LARGE_TIER):
+        return 1
+    return 0
+
+
+def unstable(model_id: str) -> bool:
+    return bool(tokens(model_id) & set(UNSTABLE))
+
+
+def rank(route: dict[str, Any], states: dict[str, str], prefer: str) -> tuple:
+    """Order routes from scan facts plus vendor naming convention.
+
+    Price is deliberately not a capability signal: a legacy flagship can be the
+    priciest entry in the catalog while being the weakest sensible choice.
+    """
+    model_id = route.get("modelId") or route["selector"]
+    base = (
+        0 if route["sourceKind"] == "harness" else 1,
+        POOL_RANK.get(states.get(route["pool"], "unknown"), 2),
+        1 if unstable(model_id) else 0,
+    )
+    if prefer == "capability":
+        return base + (
+            0 if route.get("reasoning") else 1,
+            -tier(model_id),
+            -version_of(model_id),
+            -(route.get("contextWindow") or 0),
+            route["selector"],
+        )
+    return base + (
+        tier(model_id),
+        -version_of(model_id),
+        cost_of(route),
+        route.get("contextWindow") or 0,
+        route["selector"],
+    )
+
+
+def eligible(route: dict[str, Any], role: dict[str, Any], states: dict[str, str]) -> bool:
+    if states.get(route["pool"]) in ("exhausted", "blocked"):
+        return False
+    if route["selector"] == "<live session>":
+        # Usable for work, but it cannot be named, so it cannot be pinned.
+        return False
+    if role["needs_reasoning"] and route.get("reasoning") is False:
+        return False
+    return True
+
+
+def overrides() -> dict[str, str]:
+    """User pins, honoured over anything this tool would choose.
+
+    A heuristic gets most roles right and will sometimes be wrong. The escape
+    hatch is a file, not a flag, so a pin survives every re-scan.
+    """
+    path = agents_home() / "roles.overrides.json"
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return {key: str(item) for key, item in value.items()} if isinstance(value, dict) else {}
+
+
+def effort_for(role: dict[str, Any], route: dict[str, Any]) -> str | None:
+    """Pick a thinking level from the ones this model actually supports.
+
+    A capability role takes the highest offered, a cheap role the lowest, so a
+    scout does not burn reasoning tokens summarising a file.
+    """
+    levels = route.get("thinkingLevels")
+    if not isinstance(levels, list) or not levels:
+        return None
+    return levels[-1] if role["prefer"] == "capability" else levels[0]
+
+
+def _pin_problem(
+    role: dict[str, Any],
+    route: dict[str, Any] | None,
+    states: dict[str, str],
+    assignments: dict[str, Any],
+) -> str | None:
+    """A pin is a preference, not a licence to write something unusable."""
+    if route is None:
+        return "not present in the scan"
+    if not eligible(route, role, states):
+        return "not eligible: unreachable pool, no reasoning support, or not pinnable"
+    distinct = role.get("distinct_from")
+    if distinct and assignments.get(distinct):
+        if route["family"] in (assignments[distinct]["family"], "unknown"):
+            return (
+                f"family '{route['family']}' cannot review {distinct} "
+                f"('{assignments[distinct]['family']}'); an unprovable or matching "
+                "family does not make a review independent"
+            )
+    return None
+
+
+def assign(scan: dict[str, Any]) -> dict[str, Any]:
+    states = pool_states(scan)
+    routes = scan.get("routes", [])
+    reachable = {route["selector"]: route for route in routes}
+    pinned = overrides()
+    assignments: dict[str, Any] = {}
+    notes: list[str] = []
+
+    for role in ROLES:
+        pin = pinned.get(role["id"])
+        if pin:
+            # Never write a selector the scan did not see. A role pointing at a
+            # model the user cannot reach breaks every delegation reading it.
+            route = reachable.get(pin)
+            rejection = _pin_problem(role, route, states, assignments)
+            if route is not None and rejection is None:
+                assignments[role["id"]] = {
+                    "thinking": effort_for(role, route),
+                    "selector": route["selector"],
+                    "family": route["family"],
+                    "pool": route["pool"],
+                    "source": route["source"],
+                    "sourceKind": route["sourceKind"],
+                    "purpose": role["purpose"],
+                    "pinned": True,
+                }
+                continue
+            notes.append(f"{role['id']}: ignoring pin '{pin}': {rejection}")
+
+        candidates = [route for route in routes if eligible(route, role, states)]
+        if not candidates:
+            # Relax the reasoning requirement rather than leave the role empty.
+            candidates = [
+                route
+                for route in routes
+                if eligible(route, {**role, "needs_reasoning": False}, states)
+            ]
+            if candidates:
+                notes.append(f"{role['id']}: no reasoning-capable route, relaxed")
+
+        distinct = role.get("distinct_from")
+        if distinct and assignments.get(distinct):
+            other = assignments[distinct]["family"]
+            # An unprovable family is not a different family, and a same-family
+            # reviewer is worse than none: it looks like it satisfies the gate.
+            candidates = [
+                route
+                for route in candidates
+                if route["family"] not in (other, "unknown")
+            ]
+            if not candidates:
+                assignments[role["id"]] = None
+                notes.append(
+                    f"{role['id']}: no route in a family other than '{other}'; left "
+                    "unassigned, because a same-family reviewer would falsely satisfy "
+                    "the independent-review gate"
+                )
+                continue
+
+        if not candidates:
+            assignments[role["id"]] = None
+            notes.append(f"{role['id']}: unassigned, skills keep their own default")
+            continue
+
+        chosen = min(candidates, key=lambda route: rank(route, states, role["prefer"]))
+        assignments[role["id"]] = {
+            "selector": chosen["selector"],
+            "thinking": effort_for(role, chosen),
+            "family": chosen["family"],
+            "pool": chosen["pool"],
+            "source": chosen["source"],
+            "sourceKind": chosen["sourceKind"],
+            "purpose": role["purpose"],
+        }
+
+    families = {
+        value["family"] for value in assignments.values() if value
+    }
+    if len(families) < 2:
+        notes.append(
+            "only one model family is reachable; independent review cannot be "
+            "satisfied on this machine"
+        )
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "assignedAt": datetime.now(timezone.utc).isoformat(),
+        "fromScan": scan.get("scannedAt"),
+        "harness": scan.get("harness", {}).get("id"),
+        "roles": assignments,
+        "notes": notes,
+    }
+
+
+# --------------------------------------------------------------------------
+# Neutral output, readable by any harness
+# --------------------------------------------------------------------------
+
+
+def render_markdown(routing: dict[str, Any]) -> str:
+    lines = [
+        "# Model routing",
+        "",
+        f"Generated by `agent-roles assign` at {routing['assignedAt']} from a scan taken",
+        f"at {routing['fromScan']} on harness `{routing['harness']}`.",
+        "",
+        "This is an override layer. A role with no selector keeps whatever default the",
+        "skill already uses, so nothing breaks when this file is missing or stale.",
+        "",
+        "| Role | Model | Family | Pool | Purpose |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for role in ROLES:
+        value = routing["roles"].get(role["id"])
+        if value:
+            lines.append(
+                f"| `{role['id']}` | `{value['selector']}` | {value['family']} | "
+                f"{value['pool']} | {role['purpose']} |"
+            )
+        else:
+            lines.append(f"| `{role['id']}` | _unassigned_ | - | - | {role['purpose']} |")
+
+    if routing["notes"]:
+        lines += ["", "## Notes", ""]
+        lines += [f"- {note}" for note in routing["notes"]]
+
+    lines += [
+        "",
+        "Re-run `agent-routes scan && agent-roles assign` after any credential,",
+        "subscription, or harness change. Never hand-edit this file.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_neutral(routing: dict[str, Any]) -> list[Path]:
+    home = agents_home()
+    home.mkdir(parents=True, exist_ok=True)
+    json_path = routing_path()
+    md_path = home / "routing.md"
+    _atomic_write(json_path, json.dumps(routing, indent=2, sort_keys=True) + "\n")
+    _atomic_write(md_path, render_markdown(routing))
+    return [json_path, md_path]
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    staging = path.with_name(f".{path.name}.writing")
+    staging.write_text(content, encoding="utf-8")
+    os.replace(staging, path)
+
+
+# --------------------------------------------------------------------------
+# Harness adapters
+# --------------------------------------------------------------------------
+
+
+def apply_omp(routing: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    """Write omp's own role config, merging rather than replacing.
+
+    omp resolves `@role` aliases in agent frontmatter through `modelRoles`, and
+    `task.agentModelOverrides` pins a model per bundled agent. Both are records,
+    so read, merge, and write back through `omp config`, which is the supported
+    mutation path and avoids rewriting the user's YAML by hand.
+    """
+    if not shutil.which("omp"):
+        return {"harness": "omp", "status": "skipped", "reason": "omp is not on PATH"}
+
+    roles = routing["roles"]
+
+    def selector(role: str) -> str | None:
+        value = roles.get(role)
+        if not value:
+            return None
+        effort = value.get("thinking")
+        return f"{value['selector']}:{effort}" if effort else value["selector"]
+
+    desired_roles = {
+        key: value
+        for key, value in {
+            "plan": selector("plan"),
+            "default": selector("implement"),
+            "review": selector("review"),
+            "smol": selector("scout"),
+            "task": selector("implement"),
+        }.items()
+        if value
+    }
+    # Only the agents whose routing this tool actually changes. `scout` and
+    # `sonic` already resolve `@smol`, which modelRoles above sets, so writing
+    # them again would overwrite per-agent tuning for no behavioural gain.
+    desired_agents = {
+        key: value
+        for key, value in {
+            "reviewer": "@review" if selector("review") else None,
+            "security-reviewer": "@review" if selector("review") else None,
+        }.items()
+        if value
+    }
+
+    # Read everything first. A failed read must abort before any write, or the
+    # merge silently drops every entry this tool does not manage.
+    targets = (("modelRoles", desired_roles), ("task.agentModelOverrides", desired_agents))
+    try:
+        backup = {key: _omp_get(key) for key, _ in targets}
+    except ConfigUnreadable as error:
+        return {"harness": "omp", "status": "aborted", "reason": str(error), "changes": []}
+
+    planned = [
+        {
+            "key": key,
+            "merged": {**backup[key], **desired},
+            "added": {k: v for k, v in desired.items() if backup[key].get(k) != v},
+            "preserved": sorted(set(backup[key]) - set(desired)),
+        }
+        for key, desired in targets
+        if {**backup[key], **desired} != backup[key]
+    ]
+
+    if not planned:
+        return {"harness": "omp", "status": "already-current", "changes": [], "backup": None}
+    if dry_run:
+        return {"harness": "omp", "status": "would-change", "changes": planned, "backup": None}
+
+    # Back up before mutating, not after: a failure between the two writes must
+    # still leave a restore point.
+    saved = _write_backup(backup)
+
+    written = []
+    for change in planned:
+        try:
+            _omp_set(change["key"], change["merged"])
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            return {
+                "harness": "omp",
+                "status": "partial",
+                "reason": (
+                    f"{change['key']} failed: {error}. Restore with the backup below, "
+                    f"then re-run."
+                ),
+                "changes": written,
+                "backup": str(saved),
+            }
+        readback = _omp_get(change["key"])
+        if readback != change["merged"]:
+            return {
+                "harness": "omp",
+                "status": "unverified",
+                "reason": f"{change['key']} did not read back as written; another writer may be active",
+                "changes": written,
+                "backup": str(saved),
+            }
+        written.append(change)
+
+    return {"harness": "omp", "status": "changed", "changes": written, "backup": str(saved)}
+
+
+def _write_backup(backup: dict[str, Any]) -> Path:
+    directory = agents_home() / "backups"
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    path = directory / f"omp-config-{stamp}.json"
+    path.write_text(json.dumps(backup, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+class ConfigUnreadable(RuntimeError):
+    """Reading current config failed, so merging would silently drop entries."""
+
+
+def _omp_get(key: str) -> dict[str, str]:
+    """Read a config record, failing closed.
+
+    An unreadable record must never be treated as an empty one: the merge would
+    then write only the keys this tool manages and drop everything else the
+    user had configured.
+    """
+    result = subprocess.run(
+        ["omp", "config", "get", key], capture_output=True, text=True, timeout=30, check=False
+    )
+    if result.returncode != 0:
+        raise ConfigUnreadable(f"omp config get {key} failed: {result.stderr.strip()[:160]}")
+    raw = result.stdout.strip()
+    if not raw:
+        # Empty output means either "unset" or a silent failure. Only the first
+        # is safe to merge against, so confirm the key is genuinely absent.
+        if _omp_key_absent(key):
+            return {}
+        raise ConfigUnreadable(f"omp config get {key} returned nothing but the key exists")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ConfigUnreadable(f"omp config get {key} returned non-JSON: {error}") from error
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ConfigUnreadable(f"omp config get {key} is not a record: {type(value).__name__}")
+    return value
+
+
+def _omp_key_absent(key: str) -> bool:
+    listing = subprocess.run(
+        ["omp", "config", "list"], capture_output=True, text=True, timeout=30, check=False
+    )
+    if listing.returncode != 0:
+        return False
+    return not any(line.strip().startswith(f"{key} =") for line in listing.stdout.splitlines())
+
+
+def _omp_set(key: str, value: dict[str, str]) -> None:
+    subprocess.run(
+        ["omp", "config", "set", key, json.dumps(value, sort_keys=True)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+
+
+ADAPTERS = {"omp": apply_omp}
+
+
+def apply(routing: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    harness = routing.get("harness")
+    adapter = ADAPTERS.get(harness)
+    if adapter is None:
+        return {
+            "harness": harness,
+            "status": "no-adapter",
+            "reason": (
+                "this harness has no role configuration to write; the neutral "
+                "routing file is the contract, and skills read it directly"
+            ),
+        }
+    return adapter(routing, dry_run)
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+
+
+def summarise(routing: dict[str, Any]) -> str:
+    lines = [f"harness    {routing['harness']}", f"from scan  {routing['fromScan']}", "", "roles"]
+    for role in ROLES:
+        value = routing["roles"].get(role["id"])
+        if value:
+            kind = "" if value["sourceKind"] == "harness" else "  [cli fallback]"
+            lines.append(
+                f"  {role['id']:<10} {value['selector']:<44} {value['family']:<9}"
+                f" {value['pool']}{kind}"
+            )
+        else:
+            lines.append(f"  {role['id']:<10} unassigned; skills keep their default")
+    if routing["notes"]:
+        lines += ["", "notes"] + [f"  - {note}" for note in routing["notes"]]
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("action", choices=("assign", "show", "apply"), nargs="?", default="assign")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    arguments = parser.parse_args(argv)
+
+    if arguments.action == "show":
+        path = routing_path()
+        if not path.is_file():
+            print(f"agent-roles: nothing at {path}; run: agent-roles assign", file=sys.stderr)
+            return 1
+        routing = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        routing = assign(load_scan())
+        if not arguments.dry_run:
+            write_neutral(routing)
+
+    result: dict[str, Any] = {"routing": routing}
+    if arguments.action == "apply":
+        result["applied"] = apply(routing, arguments.dry_run)
+
+    if arguments.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    print(summarise(routing))
+    if arguments.action != "show" and not arguments.dry_run:
+        print(f"\nwritten to {routing_path()} and {agents_home() / 'routing.md'}")
+
+    applied = result.get("applied")
+    if applied:
+        print(f"\nharness config: {applied['status']}")
+        if applied.get("reason"):
+            print(f"  {applied['reason']}")
+        for change in applied.get("changes", []):
+            for key, value in change["added"].items():
+                print(f"  {change['key']}.{key} -> {value}")
+            if change["preserved"]:
+                print(f"  {change['key']}: kept {', '.join(change['preserved'])}")
+        if applied.get("backup"):
+            print(f"  previous values saved to {applied['backup']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
