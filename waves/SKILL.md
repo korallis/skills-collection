@@ -453,7 +453,6 @@ worktrees, native verification surfaces, and escalating beyond one interactive
 thread: `references/advanced-patterns.md`. Reach for it when the wave is
 row-shaped, competitive, write-heavy, or bigger than one session.
 
-
 ## Checklist
 
 - [ ] Used the harness plan/todo surface for multi-wave work.
