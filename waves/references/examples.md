@@ -129,7 +129,7 @@ into understanding + plan + subtasks.
    scaffolding). For anything the repo cannot answer, spawn a small scouting wave
    (one `explorer` per candidate engine/framework) on a cheaper/faster harness
    role from `~/.agents/routing.json` (current model when no routing file exists)
-   (prefer `sourceKind: harness`), and verify. State assumptions for
+   and verify. State assumptions for
    specification gaps ("web canvas, vanilla TS, one screen + score") instead of
    blocking -- ask only the one question whose answer would change the whole
    plan.
@@ -277,7 +277,7 @@ The end-to-end SWE shape -- three waves with different jobs:
    carries the plan excerpt for its subtask, its exact paths, the "you are not
    alone" warning, and the code/edit handoff format. Pick a capable coding
    role from `~/.agents/routing.json` (current model when no routing file exists)
-   (prefer `sourceKind: harness`).
+
 3. Wave C -- verify. Read-only workers run the oracles: tests, type checks,
    lint, a reviewer pass over the combined diff, regression checks on sibling
    routes. Route failures back as narrow fix tasks (bounded -- don't loop).

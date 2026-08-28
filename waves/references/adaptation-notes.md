@@ -75,7 +75,7 @@ run-shape triage and dependency-aware dispatch.
   `deep-research` Cursor skill (https://github.com/PhillipChaffee/.cursor).
 
 The worker packet is also portable: objective, non-goals, slice, permitted
-paths, acceptance, the worker's role (or a `routeId` when a scan exists), and the required return
+paths, acceptance, the worker's role (or a `routeId` for a capability-specific slice, when a scan exists), and the required return
 shape in `references/handoff-format.md`. Dispatch that packet the way the
 current harness dispatches workers.
 
@@ -298,6 +298,7 @@ re-copied into SKILL.md as if every harness worked this way:
   as model tiers, or `gpt-5.3-codex-spark`.
 - Effort field names (`reasoning_effort` vs `model_reasoning_effort`) and
   `service_tier` / `/fast` are product-specific speed levers, not general
-  model routing. Routing belongs in `~/.agents/routes.json`.
+  model routing. Routing belongs in `~/.agents/routing.json` roles (with
+  `~/.agents/routes.json` for capability-specific slices).
 - `$HOME/.agents/skills` vs `~/.codex/skills` was a Codex authoring-path
   footnote. Install this skill where the current harness discovers skills.

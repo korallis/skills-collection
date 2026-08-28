@@ -259,8 +259,8 @@ workers. The packet is self-contained and includes:
    evidence rule (cite-or-drop every important claim, tag confidence
    (`high|med|low`), and say what would change the conclusion).
 6. The worker's role from `~/.agents/routing.json` (`scout`, `implement`,
-   `review`, or `verify`), or a `routeId` from `~/.agents/routes.json` when the
-   slice needs a specific capability. No routing file: current model.
+   `review`, or `verify`), or a `routeId` from `~/.agents/routes.json` when
+   the slice needs a specific capability. No routing file: current model.
 7. The required return shape from this file - and keep
    it a digest: roughly 15 findings max with one-line evidence each; large
    artifacts (tables, logs, full lists) go to a file, cite the path.

@@ -140,10 +140,11 @@ Make the verifier's job robust:
 - Different family (optional, strongest): a same-family verifier can self-prefer
   even with an isolated context -- models recognize and favor their own output,
   and the more capable the model, the stronger the effect. For the
-  highest-stakes calls, pick a reviewer/verifier route whose `family` differs
-  from the author's. Read `family` from `~/.agents/routes.json` written by
-  `bin/agent-routes scan`, preferring `sourceKind: harness`; never guess model
-  slugs. A small panel of judges from disjoint families (majority vote on
+  highest-stakes calls, use the `review` or `verify` role from
+  `~/.agents/routing.json`, which setup keeps in a different family from
+  `implement`; confirm against the author's actual family from run receipts,
+  and never guess model slugs. With no routing file, same-model verification
+  still runs — label it same-family rather than independent. A small panel of judges from disjoint families (majority vote on
   binary verdicts, average on scores) beat a single frontier judge on human
   agreement while cutting intra-model bias and cost. (Planned as a default in a
   later version pending testing; for now an opt-in escalation.)
@@ -182,8 +183,9 @@ Prefer direct oracles over prose review:
   of the cost); the verifier does not need to be frontier-class when it has an
   oracle to consult.
 - Panel / multi-pass cross-check: for a high-stakes or contested claim, run it
-  across several independent passes (or routes whose `family` differs, from the
-  scan) and synthesize consensus vs lone-result. That extra spawning is worth it
+  across several independent passes (or the `review`/`verify` roles when a
+  routing file provides different families) and synthesize consensus vs
+  lone-result. That extra spawning is worth it
   for claims the deliverable hinges on.
 
 For docs/current behavior, use primary sources first. For current product or API
@@ -214,7 +216,8 @@ Escalation order:
 
 1. Re-task narrower.
 2. Spawn a verifier.
-3. Use a higher-capability reviewer/verifier route from the scan.
+3. Use the `review` or `verify` role from `~/.agents/routing.json` (the
+   current model when no routing file exists).
 4. Ask the user. Mark the limitation explicitly
    only as a last resort, after re-tasking and verifier passes are exhausted.
 

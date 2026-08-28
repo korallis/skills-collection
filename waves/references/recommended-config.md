@@ -8,7 +8,7 @@ particular vendor config path.
 Dispatch each worker the way the current harness dispatches workers: a
 bounded worker with a fixed packet and a required return shape. The
 packet includes objective, non-goals, slice, permitted paths, acceptance,
-the worker's role (or a `routeId` when a scan exists), and the required return shape from
+the worker's role (or a `routeId` for a capability-specific slice, when a scan exists), and the required return shape from
 [handoff-format.md](handoff-format.md). Track the plan on the harness
 plan/todo surface.
 
@@ -81,7 +81,8 @@ ownership. Do not point two writers at the same files.
 
 ## Role defaults
 
-Map roles to routes from the scan. Do not hardcode vendor model slugs.
+Model choice per role comes from `~/.agents/routing.json`; the current model
+is the no-file fallback. Do not hardcode vendor model slugs.
 
 | Role | Route to pick |
 | --- | --- |
