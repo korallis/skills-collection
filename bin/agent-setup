@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""First-run setup: install the skills, find your models, configure routing.
+
+    agent-setup              do it
+    agent-setup --dry-run    show what would change, write nothing
+    agent-setup --status     report current state without probing anything
+
+Three steps, each also runnable on its own:
+
+    bin/agent-skills link    one copy of the skills, symlinked into every harness
+    bin/agent-routes scan    which models this account can actually reach
+    bin/agent-roles apply    assign them to roles, write the harness's own config
+
+Safe to re-run. Nothing here installs, authenticates, or pays for anything.
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def run(script: str, *arguments: str) -> int:
+    """Run one step in-process order, streaming its output as it goes."""
+    command = [sys.executable, str(HERE / script), *arguments]
+    return subprocess.run(command, check=False).returncode
+
+
+def heading(step: int, total: int, title: str) -> None:
+    print(f"\n\033[1m[{step}/{total}] {title}\033[0m", flush=True)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--dry-run", action="store_true", help="write nothing")
+    parser.add_argument("--status", action="store_true", help="report state, probe nothing")
+    parser.add_argument(
+        "--replace-copies",
+        action="store_true",
+        help="move an existing non-identical skill directory aside instead of refusing it",
+    )
+    arguments = parser.parse_args(argv)
+
+    if arguments.status:
+        heading(1, 2, "Skills")
+        run("agent-skills", "status")
+        heading(2, 2, "Routing")
+        run("agent-roles", "show")
+        return 0
+
+    dry = ["--dry-run"] if arguments.dry_run else []
+
+    heading(1, 3, "Linking skills into every harness on this machine")
+    link = ["link", *dry] + (["--replace-copies"] if arguments.replace_copies else [])
+    if run("agent-skills", *link) != 0:
+        print(
+            "\nSetup stopped: a skill root holds something that is not ours.\n"
+            "Inspect the paths above. Re-run with --replace-copies to move them aside;\n"
+            "nothing has been deleted.",
+            file=sys.stderr,
+        )
+        return 1
+    if not arguments.dry_run:
+        run("agent-skills", "prune")
+
+    heading(2, 3, "Scanning for models this account can reach")
+    if run("agent-routes", "scan") != 0:
+        print(
+            "\nNo routes found. If you are inside a harness this is unexpected;\n"
+            "report the source list above rather than assuming a model.",
+            file=sys.stderr,
+        )
+        return 1
+
+    heading(3, 3, "Assigning roles and writing the harness config")
+    if run("agent-roles", "apply", *dry) != 0:
+        return 1
+
+    if arguments.dry_run:
+        print("\nDry run: nothing was written.")
+        return 0
+
+    print(
+        "\n\033[1mDone.\033[0m Skills are linked from this clone, and roles are written to\n"
+        "~/.agents/routing.json plus your harness's own config.\n"
+        "\n"
+        "  Change a role:   edit ~/.agents/roles.overrides.json, then: bin/agent-setup\n"
+        "  Check state:     bin/agent-setup --status\n"
+        "  After any change to accounts, subscriptions, or harnesses: bin/agent-setup\n"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

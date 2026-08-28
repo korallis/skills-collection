@@ -316,9 +316,9 @@ class ModelRanking(unittest.TestCase):
         self.assertEqual(ROLES.version_of("grok-4.6"), 4.6)
 
     def test_vendor_tier_words(self) -> None:
-        self.assertEqual(ROLES.tier("gpt-5.4-nano"), -1)
-        self.assertEqual(ROLES.tier("claude-opus-5"), 1)
-        self.assertEqual(ROLES.tier("some-model-2"), 0)
+        self.assertEqual(ROLES.tier("gpt-5.4-nano", "gpt"), -1)
+        self.assertEqual(ROLES.tier("claude-opus-5", "claude"), 1)
+        self.assertEqual(ROLES.tier("some-model-2", "unknown"), 0)
 
     def test_price_is_not_capability(self) -> None:
         """A legacy flagship can be the priciest entry and the worst choice."""
@@ -424,19 +424,43 @@ class TierTokens(unittest.TestCase):
 
     def test_openai_5_6_tier_words_follow_the_vendor(self) -> None:
         """OpenAI documents Terra as the mini tier and Luna as the nano tier."""
-        self.assertEqual(ROLES.tier("gpt-5.6-sol"), 1)
-        self.assertEqual(ROLES.tier("gpt-5.6-terra"), -1)
-        self.assertEqual(ROLES.tier("gpt-5.6-luna"), -1)
+        self.assertEqual(ROLES.tier("gpt-5.6-sol", "gpt"), 1)
+        self.assertEqual(ROLES.tier("gpt-5.6-terra", "gpt"), -1)
+        self.assertEqual(ROLES.tier("gpt-5.6-luna", "gpt"), -1)
 
     def test_fable_is_a_large_tier(self) -> None:
         """Anthropic calls Fable its most capable widely released model."""
-        self.assertEqual(ROLES.tier("claude-fable-5"), 1)
+        self.assertEqual(ROLES.tier("claude-fable-5", "claude"), 1)
+
+    def test_an_effort_suffix_cannot_promote_a_mid_model(self) -> None:
+        """An aggregator writes `claude-4.6-sonnet-max`, where max is the effort."""
+        self.assertEqual(ROLES.tier("claude-4.6-sonnet-max", "claude"), 0)
+        self.assertEqual(ROLES.tier("claude-4.5-sonnet-thinking", "claude"), 0)
+        self.assertEqual(ROLES.tier("cursor-grok-4.6-xhigh", "grok"), 0)
+
+    def test_an_effort_suffix_does_not_demote_a_real_tier_word(self) -> None:
+        """`max` is a real model token for OpenAI codex and Qwen."""
+        self.assertEqual(ROLES.tier("gpt-5.1-codex-max", "gpt"), 1)
+        self.assertEqual(ROLES.tier("qwen3.8-max", "qwen"), 1)
+        self.assertEqual(ROLES.tier("claude-4.6-opus-max", "claude"), 1)
+
+    def test_the_same_word_resolves_differently_per_family(self) -> None:
+        """`pro` is large for OpenAI and deliberately weightless for Gemini."""
+        self.assertEqual(ROLES.tier("gpt-5.5-pro", "gpt"), 1)
+        self.assertEqual(ROLES.tier("gemini-2.5-pro", "gemini"), 0)
+        self.assertEqual(ROLES.tier("gemini-3.5-flash-lite", "gemini"), -1)
+        self.assertEqual(ROLES.tier("gemini-3.7-flash", "gemini"), 0)
 
     def test_contradictory_words_carry_no_weight(self) -> None:
         """flash, pro, spark and fast mean different things per vendor."""
-        for model_id in ("gemini-3.7-flash", "gemini-2.5-pro", "gpt-5.3-codex-spark", "grok-4.6-fast"):
+        for model_id, family in (
+            ("gemini-3.7-flash", "gemini"),
+            ("gemini-2.5-pro", "gemini"),
+            ("gpt-5.3-codex-spark", "gpt"),
+            ("grok-4.6-fast", "grok"),
+        ):
             with self.subTest(model_id=model_id):
-                self.assertEqual(ROLES.tier(model_id), 0)
+                self.assertLessEqual(ROLES.tier(model_id, family), 0)
 
     def test_google_ordering_falls_out_of_version_once_pro_is_ignored(self) -> None:
         """gemini-3.7-flash is Google's latest and most capable stable model."""

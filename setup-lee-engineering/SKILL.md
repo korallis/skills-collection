@@ -5,7 +5,13 @@ description: Set up the agent skills collection for whatever harness you are in.
 
 # Setup
 
-Three jobs, three scripts. Run them; do not predict their output.
+One command does all three. Run it; do not predict its output.
+
+```bash
+bin/agent-setup            # link skills, scan models, assign roles, write harness config
+```
+
+`--dry-run` writes nothing. `--status` reports state without probing. The steps are also separate:
 
 ```bash
 bin/agent-skills link      # one copy of the skills, linked into every harness

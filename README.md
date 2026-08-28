@@ -20,8 +20,15 @@ Clone once, link once. The clone is the only copy on disk.
 ```bash
 git clone https://github.com/korallis/skills-collection.git
 cd skills-collection
-bin/agent-skills link
+bin/agent-setup
 ```
+
+That is the whole install. It links the skills into every harness on the machine, scans which models
+your account can actually reach, assigns them to engineering roles, and writes your harness's own
+routing config. Re-run it any time; it is idempotent.
+
+`bin/agent-setup --dry-run` shows what would change without writing. `bin/agent-setup --status`
+reports current state without probing anything. The three steps are also runnable on their own:
 
 `link` symlinks every skill into every harness skill root it finds on the machine, creating a root
 only for a harness you actually have:
@@ -53,6 +60,7 @@ an individual `SKILL.md`.
 Skills here never assume which models or CLIs exist. They scan.
 
 ```bash
+bin/agent-skills link     # one copy of the skills, symlinked into every harness
 bin/agent-routes scan     # writes ~/.agents/routes.json
 bin/agent-roles apply     # assigns roles, writes routing + the harness's own config
 ```
@@ -74,7 +82,25 @@ while there is still only one file to edit.
 Adding a harness or CLI is one entry in `PROBES` in [`bin/agent-routes`](bin/agent-routes); adding a
 harness config writer is one entry in `ADAPTERS` in [`bin/agent-roles`](bin/agent-roles).
 
-See [setup-lee-engineering](setup-lee-engineering/) for the guided version, invocable as
+### Changing a role
+
+The ranking is a heuristic and will sometimes disagree with you. Pin any role, and it wins on every
+re-run:
+
+```jsonc
+// ~/.agents/roles.overrides.json
+{ "review": "anthropic/claude-fable-5" }
+```
+
+Then `bin/agent-setup`. A pin naming a model the scan did not find, or one that would defeat the
+different-family rule for `review`, is ignored and reported rather than written.
+
+Tier words are resolved per model family, because the same word means different things to different
+vendors: `max` is a real model token for OpenAI's `codex-max` and Qwen's top tier, but a
+reasoning-effort suffix on aggregator Anthropic ids. Evidence and URLs for every such call are in
+[lee-engineering/references/model-facts.md](lee-engineering/references/model-facts.md).
+
+See [setup-lee-engineering](setup-lee-engineering/) for the in-chat version, invocable as
 `/setup-lee-engineering`.
 
 ## Catalog
