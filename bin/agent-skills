@@ -35,27 +35,38 @@ NON_SKILL_ENTRIES = {"bin", "licenses", ".git", ".github", "tests"}
 # always targeted; the rest are created only when the harness that owns them is
 # already present, so nothing is created for a harness the user does not have.
 HARNESS_ROOTS: tuple[tuple[str, str | None], ...] = (
-    ("~/.agents/skills", None),
-    ("~/.claude/skills", "~/.claude"),
-    ("~/.cursor/skills", "~/.cursor"),
-    ("~/.codex/skills", "~/.codex"),
-    ("~/.factory/skills", "~/.factory"),
-    ("~/.grok/skills", "~/.grok"),
-    ("~/.gemini/skills", "~/.gemini"),
-    ("~/.t3/skills", "~/.t3"),
-    ("~/.droid/skills", "~/.droid"),
+    (".agents/skills", None),
+    (".claude/skills", ".claude"),
+    (".cursor/skills", ".cursor"),
+    (".codex/skills", ".codex"),
+    (".factory/skills", ".factory"),
+    (".grok/skills", ".grok"),
+    (".gemini/skills", ".gemini"),
+    (".t3/skills", ".t3"),
+    (".droid/skills", ".droid"),
 )
 
 # AGENTS.md is the cross-agent convention. Claude Code reads CLAUDE.md instead,
 # so CLAUDE.md becomes a symlink to it: one file to edit, both names present.
 AGENTS_FILES: tuple[tuple[str, str], ...] = (
-    ("~/.omp/agent/AGENTS.md", "~/.claude/CLAUDE.md"),
-    ("~/.agents/AGENTS.md", "~/.claude/CLAUDE.md"),
+    (".omp/agent/AGENTS.md", ".claude/CLAUDE.md"),
+    (".agents/AGENTS.md", ".claude/CLAUDE.md"),
 )
 
 
 class UnsafeRoot(RuntimeError):
     """A target root would damage the collection it is supposed to serve."""
+
+
+def harness_home() -> Path:
+    """Base for harness skill roots.
+
+    Overridable so the installer can be exercised against a sandbox without
+    touching real roots. Credentials are not read here, so redirecting this is
+    safe and complete.
+    """
+    override = os.environ.get("AGENT_HARNESS_HOME")
+    return Path(override).expanduser() if override else Path.home()
 
 
 def collection_root() -> Path:
@@ -89,8 +100,9 @@ def check_root(root: Path, source_root: Path) -> Path:
 
 
 def target_roots(extra: list[str], source_root: Path) -> list[Path]:
-    candidates = [Path(candidate).expanduser() for candidate, _ in HARNESS_ROOTS]
-    owners = [Path(owner).expanduser() if owner else None for _, owner in HARNESS_ROOTS]
+    base = harness_home()
+    candidates = [base / candidate for candidate, _ in HARNESS_ROOTS]
+    owners = [base / owner if owner else None for _, owner in HARNESS_ROOTS]
 
     roots = [
         candidate
@@ -326,13 +338,11 @@ def mirror_agents_file(explicit: str | None, dry_run: bool) -> list[dict[str, An
     real files means editing one and silently diverging from the other, so
     CLAUDE.md becomes a link that is never edited directly.
     """
+    base = harness_home()
     pairs = (
-        [(Path(explicit).expanduser(), Path("~/.claude/CLAUDE.md").expanduser())]
+        [(Path(explicit).expanduser(), base / ".claude/CLAUDE.md")]
         if explicit
-        else [
-            (Path(source).expanduser(), Path(mirror).expanduser())
-            for source, mirror in AGENTS_FILES
-        ]
+        else [(base / source, base / mirror) for source, mirror in AGENTS_FILES]
     )
     if explicit and not pairs[0][0].is_file():
         return [
@@ -441,6 +451,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--root", action="append", default=[], help="extra skill root")
     parser.add_argument(
+        "--home",
+        help="base for harness skill roots instead of $HOME (also AGENT_HARNESS_HOME)",
+    )
+    parser.add_argument(
         "--replace-copies",
         action="store_true",
         help="move a non-identical directory aside instead of refusing it",
@@ -448,6 +462,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     arguments = parser.parse_args(argv)
+    if arguments.home:
+        os.environ["AGENT_HARNESS_HOME"] = arguments.home
 
     source_root = collection_root()
     skills = skill_directories(source_root)
