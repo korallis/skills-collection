@@ -117,17 +117,40 @@ def cost_of(route: dict[str, Any]) -> float:
     return float(output) if isinstance(output, (int, float)) else 0.0
 
 
-# Vendor tier vocabulary. These are naming conventions, not model identities:
-# every major provider marks its small tier with one of the first set and its
-# large tier with one of the second. It is a heuristic, and it is overridable
-# per role in ~/.agents/roles.overrides.json.
-SMALL_TIER = ("mini", "nano", "haiku", "flash", "lite", "small", "tiny", "air", "spark")
-LARGE_TIER = ("opus", "max", "ultra", "heavy", "large", "pro", "sol", "terra")
-UNSTABLE = ("preview", "exp", "experimental", "beta", "alpha")
+# Vendor tier vocabulary, verified against first-party docs on 2026-08-28.
+# See lee-engineering/references/model-facts.md for the evidence and URLs.
+#
+# Only words that mean the same thing for every vendor appear here. Words that
+# contradict across vendors are listed in AMBIGUOUS_TIER and deliberately carry
+# no weight, because a global word list cannot resolve them:
+#   flash   Google's `gemini-3.7-flash` is its latest and most capable stable
+#           model and costs more than `gemini-2.5-pro`, so flash is not small.
+#   pro     large within one generation, but an older `pro` loses to a newer
+#           `flash`, so ranking on it inverts Google's own ordering.
+#   spark   small for OpenAI (`gpt-5.3-codex-spark`), a flagship product name
+#           for Meta (`muse-spark`).
+#   fast    serving priority, not capability. Cursor sells `Grok 4.6 (Fast)` at
+#           double the price for, in its words, "the same intelligence".
+SMALL_TIER = (
+    "mini", "nano", "haiku", "lite", "small", "tiny", "air",
+    "terra",   # OpenAI: "corresponds to the mini model tier"
+    "luna",    # OpenAI: "corresponds to the nano model tier"
+    "scout",   # Meta: smallest Llama 4
+)
+LARGE_TIER = (
+    "opus", "ultra", "heavy", "large", "max", "plus",
+    "fable",     # Anthropic: "most capable widely released model"
+    "sol",       # OpenAI: flagship, "corresponds to the unsuffixed model tier"
+    "behemoth",  # Meta: largest Llama 4
+)
+AMBIGUOUS_TIER = ("flash", "pro", "spark", "fast", "highspeed")
+UNSTABLE = ("preview", "exp", "experimental", "beta", "alpha", "rc")
 
-# A version is a major, optionally followed by a minor written with either a
-# dot or a dash: `gpt-5.6`, `claude-opus-4-5`, and `claude-3-5-sonnet` are 5.6,
-# 4.5 and 3.5. Release stamps look like versions and are not, so they go first.
+# Restricted releases: real models, but gated behind separate approval and
+# scoped to defensive security work. Never auto-assign one to a general
+# engineering role.
+RESTRICTED = ("mythos", "daybreak", "cyber")
+
 VERSION = re.compile(r"(?<![0-9.])(\d+)(?:[.-](\d+))?(?![0-9])")
 DATE_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}|\d{8}|\d{6}")
 # Context and parameter markers look like a minor version and are not:
@@ -173,6 +196,11 @@ def unstable(model_id: str) -> bool:
     return bool(tokens(model_id) & set(UNSTABLE))
 
 
+def restricted(model_id: str) -> bool:
+    """Gated release, scoped to security work, needing separate provisioning."""
+    return bool(tokens(model_id) & set(RESTRICTED))
+
+
 def rank(route: dict[str, Any], states: dict[str, str], prefer: str) -> tuple:
     """Order routes from scan facts plus vendor naming convention.
 
@@ -207,6 +235,8 @@ def eligible(route: dict[str, Any], role: dict[str, Any], states: dict[str, str]
         return False
     if route["selector"] == "<live session>":
         # Usable for work, but it cannot be named, so it cannot be pinned.
+        return False
+    if restricted(route.get("modelId") or route["selector"]):
         return False
     if role["needs_reasoning"] and route.get("reasoning") is False:
         return False

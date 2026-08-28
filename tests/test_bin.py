@@ -50,6 +50,16 @@ class FamilyDerivation(unittest.TestCase):
             with self.subTest(model_id=model_id):
                 self.assertEqual(ROUTES.family_of(model_id), family)
 
+    def test_mistral_small_line_is_not_missed(self) -> None:
+        """`ministral` does not contain the substring `mistral`."""
+        self.assertEqual(ROUTES.family_of("ministral-3-8b-25-12"), "mistral")
+        self.assertEqual(ROUTES.family_of("leanstral-1-5"), "mistral")
+
+    def test_meta_ships_two_lines(self) -> None:
+        self.assertEqual(ROUTES.family_of("llama-4-behemoth"), "llama")
+        self.assertEqual(ROUTES.family_of("muse-spark-1.2"), "muse")
+        self.assertEqual(ROUTES.family_of("muse-glimmer"), "muse")
+
     def test_grok_composer_is_grok_not_composer(self) -> None:
         """xAI ships grok-composer-*; only Cursor's bare composer-* is its own line."""
         self.assertEqual(ROUTES.family_of("grok-composer-2.5-fast"), "grok")
@@ -409,9 +419,45 @@ class AgentsFileMirror(unittest.TestCase):
 class TierTokens(unittest.TestCase):
     def test_mini_does_not_match_gemini(self) -> None:
         """Substring matching classified every Gemini model as a small model."""
-        self.assertEqual(ROLES.tier("gemini-3.1-pro"), 1)
-        self.assertEqual(ROLES.tier("gemini-3.7-flash"), -1)
+        self.assertEqual(ROLES.tier("gemini-3.7-flash"), 0)
         self.assertEqual(ROLES.tier("minimax-m1"), 0)
+
+    def test_openai_5_6_tier_words_follow_the_vendor(self) -> None:
+        """OpenAI documents Terra as the mini tier and Luna as the nano tier."""
+        self.assertEqual(ROLES.tier("gpt-5.6-sol"), 1)
+        self.assertEqual(ROLES.tier("gpt-5.6-terra"), -1)
+        self.assertEqual(ROLES.tier("gpt-5.6-luna"), -1)
+
+    def test_fable_is_a_large_tier(self) -> None:
+        """Anthropic calls Fable its most capable widely released model."""
+        self.assertEqual(ROLES.tier("claude-fable-5"), 1)
+
+    def test_contradictory_words_carry_no_weight(self) -> None:
+        """flash, pro, spark and fast mean different things per vendor."""
+        for model_id in ("gemini-3.7-flash", "gemini-2.5-pro", "gpt-5.3-codex-spark", "grok-4.6-fast"):
+            with self.subTest(model_id=model_id):
+                self.assertEqual(ROLES.tier(model_id), 0)
+
+    def test_google_ordering_falls_out_of_version_once_pro_is_ignored(self) -> None:
+        """gemini-3.7-flash is Google's latest and most capable stable model."""
+        newer_flash = {
+            "selector": "g/gemini-3.7-flash", "modelId": "gemini-3.7-flash",
+            "sourceKind": "harness", "pool": "p", "reasoning": True,
+            "contextWindow": 1000000, "cost": {"output": 3.75},
+        }
+        older_pro = {
+            "selector": "g/gemini-2.5-pro", "modelId": "gemini-2.5-pro",
+            "sourceKind": "harness", "pool": "p", "reasoning": True,
+            "contextWindow": 1000000, "cost": {"output": 10},
+        }
+        best = min([older_pro, newer_flash], key=lambda r: ROLES.rank(r, {}, "capability"))
+        self.assertEqual(best["modelId"], "gemini-3.7-flash")
+
+    def test_restricted_releases_are_never_auto_assigned(self) -> None:
+        for model_id in ("claude-mythos-5", "gpt-daybreak-blue-latest", "gpt-5.6-cyber"):
+            with self.subTest(model_id=model_id):
+                self.assertTrue(ROLES.restricted(model_id))
+        self.assertFalse(ROLES.restricted("claude-fable-5"))
 
     def test_context_markers_do_not_inflate_the_version(self) -> None:
         """claude-opus-5-1m is version 5, not 5.1, so it cannot outrank the base model."""
