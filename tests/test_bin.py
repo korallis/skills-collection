@@ -582,9 +582,13 @@ class ModelAgnosticism(unittest.TestCase):
     """
 
     SLUG = re.compile(
+        # A family word followed, optionally through one tier/series word, by a
+        # version: gpt-5, qwen3.8-max, minimax-m1, deepseek-r1, mistral-small-3.2.
         r"\b(?:claude|gpt|grok|gemini|kimi|glm|composer|sonnet|opus|haiku|fable|mythos"
-        r"|llama|deepseek|qwen|mistral|ministral|codestral|muse|spark|glimmer|minimax)-v?[0-9]"
-        r"|\bo[134][0-9]?-(?:mini|nano|pro|max|preview|high|low)",
+        r"|llama|deepseek|qwen|mistral|ministral|codestral|muse|spark|glimmer|minimax)"
+        r"(?:-[a-z]+)?[-.]?v?[0-9]"
+        # OpenAI o-series: o1, o3-mini, o4.
+        r"|\bo[134][0-9]?\b",
         re.I,
     )
     ALLOWED = {

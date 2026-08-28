@@ -7,7 +7,7 @@ iterate). Because `waves` is an *orchestration* skill, the unit under
 test is the **transcript** -- how the manager decomposed, fanned out,
 verified, and synthesized -- not just the final artifact.
 
-This skill was formerly named `waves`.
+This skill was formerly named `waves-codex`.
 
 ## What's Here
 
