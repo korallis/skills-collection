@@ -163,7 +163,7 @@ Apache License 2.0. Copyright 2026 Ray Fernando. License text: [licenses/APACHE-
 
 Copied here: `bootstrap-ios`, `running-bug-review-board`, `swiftui-animation-match`, and `waves` (renamed from `waves-codex`).
 
-`waves` keeps Ray's method and drops its Codex-specific runner instructions so it works in any harness; model choice now comes from `bin/agent-routes scan`. It also credits [Phillip Chaffee's public `deep-research` Cursor skill](https://github.com/PhillipChaffee/.cursor) for run-shape triage and dependency-aware dispatch. `swiftui-animation-match` catalogs [Shubham Kumar Singh's SwiftUI-Animations](https://github.com/Shubham0812/SwiftUI-Animations). `bootstrap-ios` routes to community packs listed in [bootstrap-ios/references/sources.md](bootstrap-ios/references/sources.md).
+`waves` keeps Ray's method and drops its Codex-specific runner instructions so it works in any harness; model choice comes from the roles in `~/.agents/routing.json`, with the current model as the fallback when no routing file exists. It also credits [Phillip Chaffee's public `deep-research` Cursor skill](https://github.com/PhillipChaffee/.cursor) for run-shape triage and dependency-aware dispatch. `swiftui-animation-match` catalogs [Shubham Kumar Singh's SwiftUI-Animations](https://github.com/Shubham0812/SwiftUI-Animations). `bootstrap-ios` routes to community packs listed in [bootstrap-ios/references/sources.md](bootstrap-ios/references/sources.md).
 
 ### Robert C. Martin — *Clean Code* and *Clean Architecture*
 
