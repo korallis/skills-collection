@@ -10,6 +10,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import os
 import re
 import subprocess
 import sys
@@ -598,8 +599,6 @@ class ModelAgnosticism(unittest.TestCase):
         "waves/references/adaptation-notes.md": "dated historical research notes",
         "bin/agent-roles": "code comments citing the evidence behind tier rules",
         "bin/agent-routes": "code comments citing the evidence behind family rules",
-        "lee-engineering/scripts/lee-grok-review": "fallback default, overridable via LEE_GROK_REVIEW_MODEL",
-        "lee-engineering/scripts/lee-cursor-grok": "fallback default, overridable via LEE_CURSOR_GROK_MODEL",
     }
 
     def tracked_files(self) -> list[str]:
@@ -638,6 +637,61 @@ class ModelAgnosticism(unittest.TestCase):
                     self.SLUG.search(path.read_text(encoding="utf-8")),
                     f"{name} no longer contains a model slug; prune its exemption",
                 )
+
+
+class PinCommand(unittest.TestCase):
+    def test_pin_rejects_a_selector_the_scan_did_not_see(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / "routes.json").write_text(json.dumps({
+                "routes": [{"selector": "t/real-model-5", "family": "gpt",
+                            "sourceKind": "harness", "source": "t", "pool": "t:p",
+                            "modelId": "real-model-5", "reasoning": True,
+                            "contextWindow": 1, "cost": None}],
+                "pools": [], "harness": {"id": "t"}, "scannedAt": "t",
+            }), encoding="utf-8")
+            env = dict(os.environ, AGENT_SKILLS_HOME=str(home),
+                       AGENT_ROUTES_FILE=str(home / "routes.json"))
+            bad = subprocess.run(
+                [sys.executable, str(ROOT / "bin" / "agent-roles"), "pin", "review", "no/such-model"],
+                capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual(bad.returncode, 2)
+            self.assertIn("not in the scan", bad.stderr)
+            self.assertFalse((home / "roles.overrides.json").exists())
+
+            good = subprocess.run(
+                [sys.executable, str(ROOT / "bin" / "agent-roles"), "pin", "scout", "t/real-model-5"],
+                capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual(good.returncode, 0, good.stderr)
+            pins = json.loads((home / "roles.overrides.json").read_text(encoding="utf-8"))
+            self.assertEqual(pins, {"scout": "t/real-model-5"})
+
+            cleared = subprocess.run(
+                [sys.executable, str(ROOT / "bin" / "agent-roles"), "pin", "scout", "--clear"],
+                capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual(cleared.returncode, 0, cleared.stderr)
+            self.assertEqual(json.loads((home / "roles.overrides.json").read_text(encoding="utf-8")), {})
+
+    def test_pin_rejects_an_unknown_role(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "agent-roles"), "pin", "nonsense", "a/b"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unknown role", result.stderr)
+
+
+class WrapperSelectors(unittest.TestCase):
+    def test_wrappers_refuse_to_run_without_an_explicit_selector(self) -> None:
+        """No baked-in model default: stale slugs cannot hide in fallback tooling."""
+        for wrapper in ("lee-grok-review", "lee-cursor-grok"):
+            with self.subTest(wrapper=wrapper):
+                env = {k: v for k, v in os.environ.items()
+                       if k not in ("LEE_GROK_REVIEW_MODEL", "LEE_CURSOR_GROK_MODEL")}
+                result = subprocess.run(
+                    [str(ROOT / "lee-engineering" / "scripts" / wrapper)],
+                    capture_output=True, text=True, env=env, timeout=30)
+                self.assertEqual(result.returncode, 64)
+                self.assertIn("selector from your scan", result.stderr)
 
 
 class CollectionIntegrity(unittest.TestCase):

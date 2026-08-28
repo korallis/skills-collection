@@ -84,16 +84,18 @@ harness config writer is one entry in `ADAPTERS` in [`bin/agent-roles`](bin/agen
 
 ### Changing a role
 
-The ranking is a heuristic and will sometimes disagree with you. Pin any role, and it wins on every
-re-run:
+The ranking is a heuristic and will sometimes disagree with you. Pin any role with the validated
+writer, and it wins on every re-run:
 
-```jsonc
-// ~/.agents/roles.overrides.json
-{ "review": "<a selector present in the scan>" }
+```bash
+bin/agent-roles pin review <selector from the scan>   # rejects anything the scan did not see
+bin/agent-roles apply                                 # push into the harness config
+bin/agent-roles pin review --clear                    # back to the heuristic
 ```
 
-Then `bin/agent-setup`. A pin naming a model the scan did not find, or one that would defeat the
-different-family rule for `review`, is ignored and reported rather than written.
+Pins live in `~/.agents/roles.overrides.json`. One that would defeat the different-family rule for
+`review` is ignored and reported rather than written. The `setup-lee-engineering` skill walks
+through this role by role, the way pstack's `/setup-pstack` confirms its model mapping.
 
 Tier words are resolved per model family, because the same word means different things to different
 vendors: `max` is a real model token for OpenAI's `codex-max` and Qwen's top tier, but a
