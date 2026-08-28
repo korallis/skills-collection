@@ -29,7 +29,7 @@ jobs:
 
       - name: Executables are syntactically valid
         run: |
-          python3 -m py_compile bin/agent-routes bin/agent-skills
+          python3 -m py_compile bin/agent-routes bin/agent-skills bin/agent-roles bin/agent-setup
           sh -n lee-engineering/scripts/lee-grok
           sh -n lee-engineering/scripts/lee-grok-review
           sh -n lee-engineering/scripts/lee-cursor-grok
@@ -83,6 +83,19 @@ jobs:
           assert harness_routes[0]["family"] == "unknown", harness_routes[0]
           print("live-session route present")
           PY
+
+      - name: First-run setup is a dry-runnable no-op on a bare machine
+        env:
+          AGENT_SKILLS_HOME: ${{ runner.temp }}/agents-home
+          AGENT_ROUTES_FILE: ${{ runner.temp }}/agents-home/routes.json
+        run: |
+          # No harness and no vendor CLI: setup must fail loudly at the scan
+          # rather than crash or silently claim success.
+          python3 bin/agent-setup --dry-run && status=0 || status=$?
+          if [ "$status" -gt 1 ]; then
+            echo "setup crashed with status $status" >&2
+            exit 1
+          fi
 
       - name: Every skill declares a name matching its directory
         run: |

@@ -117,38 +117,53 @@ def cost_of(route: dict[str, Any]) -> float:
     return float(output) if isinstance(output, (int, float)) else 0.0
 
 
-# Vendor tier vocabulary, verified against first-party docs on 2026-08-28.
-# See lee-engineering/references/model-facts.md for the evidence and URLs.
+# Tier vocabulary, verified against first-party vendor docs on 2026-08-28.
+# Evidence and URLs: lee-engineering/references/model-facts.md
 #
-# Only words that mean the same thing for every vendor appear here. Words that
-# contradict across vendors are listed in AMBIGUOUS_TIER and deliberately carry
-# no weight, because a global word list cannot resolve them:
-#   flash   Google's `gemini-3.7-flash` is its latest and most capable stable
-#           model and costs more than `gemini-2.5-pro`, so flash is not small.
-#   pro     large within one generation, but an older `pro` loses to a newer
-#           `flash`, so ranking on it inverts Google's own ordering.
-#   spark   small for OpenAI (`gpt-5.3-codex-spark`), a flagship product name
-#           for Meta (`muse-spark`).
-#   fast    serving priority, not capability. Cursor sells `Grok 4.6 (Fast)` at
-#           double the price for, in its words, "the same intelligence".
-SMALL_TIER = (
-    "mini", "nano", "haiku", "lite", "small", "tiny", "air",
-    "terra",   # OpenAI: "corresponds to the mini model tier"
-    "luna",    # OpenAI: "corresponds to the nano model tier"
-    "scout",   # Meta: smallest Llama 4
+# Tiers are resolved PER FAMILY, because the same word means different things to
+# different vendors and an aggregator catalog mixes them all in one namespace:
+#   max    a model token for OpenAI (`gpt-5.1-codex-max`, "long running tasks")
+#          but a reasoning-effort suffix on Anthropic ids in aggregator
+#          catalogs (`claude-4.6-sonnet-max`). Global matching promoted a
+#          mid-tier Sonnet to flagship.
+#   pro    large within one Gemini generation, yet an older `pro` loses to a
+#          newer `flash`, so weighting it inverts Google's own ordering. Not a
+#          Z.ai model token at all: GLM-5 Pro/Max are subscription plans.
+#   flash  `gemini-3.7-flash` is Google's latest and most capable STABLE model,
+#          priced above `gemini-2.5-pro`.
+#   spark  small for OpenAI, a flagship product name for Meta's Muse line.
+#   fast   serving priority, not capability. Cursor charges double for "a
+#          faster variant with the same intelligence".
+FAMILY_TIERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    # family: (small words, large words). `sonnet` is mid and appears in neither.
+    "claude": (("haiku",), ("opus", "fable")),
+    "gpt": (("mini", "nano", "terra", "luna", "spark"), ("sol", "pro", "max")),
+    "gemini": (("lite",), ()),
+    "grok": ((), ()),
+    "kimi": ((), ()),
+    "glm": (("air", "flash"), ("x",)),
+    "qwen": (("flash",), ("max", "plus")),
+    "llama": (("scout",), ("behemoth",)),
+    "muse": ((), ()),
+    "mistral": (("small", "ministral", "tiny"), ("large",)),
+    "deepseek": ((), ()),
+    "minimax": ((), ()),
+    "composer": ((), ()),
+}
+# Applied only when the family has no table of its own.
+DEFAULT_TIERS: tuple[tuple[str, ...], tuple[str, ...]] = (
+    ("mini", "nano", "lite", "small", "tiny"),
+    ("ultra", "heavy", "large"),
 )
-LARGE_TIER = (
-    "opus", "ultra", "heavy", "large", "max", "plus",
-    "fable",     # Anthropic: "most capable widely released model"
-    "sol",       # OpenAI: flagship, "corresponds to the unsuffixed model tier"
-    "behemoth",  # Meta: largest Llama 4
-)
-AMBIGUOUS_TIER = ("flash", "pro", "spark", "fast", "highspeed")
+
+# Reasoning-effort levels that appear as id suffixes in aggregator catalogs.
+# Stripped before tier matching so an effort cannot masquerade as a tier.
+EFFORT_WORDS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "thinking")
+
 UNSTABLE = ("preview", "exp", "experimental", "beta", "alpha", "rc")
 
-# Restricted releases: real models, but gated behind separate approval and
-# scoped to defensive security work. Never auto-assign one to a general
-# engineering role.
+# Restricted releases: real models, gated behind separate approval and scoped to
+# security work. Never auto-assign one to a general engineering role.
 RESTRICTED = ("mythos", "daybreak", "cyber")
 
 VERSION = re.compile(r"(?<![0-9.])(\d+)(?:[.-](\d+))?(?![0-9])")
@@ -182,12 +197,26 @@ def tokens(model_id: str) -> set[str]:
     return {part for part in re.split(r"[^a-z]+", model_id.lower()) if part}
 
 
-def tier(model_id: str) -> int:
-    """-1 small, 0 unmarked, 1 large."""
+def tier(model_id: str, family: str = "") -> int:
+    """-1 small, 0 unmarked, 1 large, resolved within the model's own family.
+
+    Trailing reasoning-effort words are stripped first: an aggregator writes
+    `claude-4.6-sonnet-max`, where `max` is the effort, not the tier.
+    """
     words = tokens(model_id)
-    if words & set(SMALL_TIER):
+    small, large = FAMILY_TIERS.get(family, DEFAULT_TIERS)
+
+    # Strip a trailing effort word only when it is not also a tier word for this
+    # family. `max` is an effort suffix on aggregator Anthropic ids, and a real
+    # model token for OpenAI's `codex-max` and Qwen's top tier.
+    family_words = set(small) | set(large)
+    trailing = re.split(r"[^a-z]+", model_id.lower().rstrip("-_"))
+    while trailing and trailing[-1] in EFFORT_WORDS and trailing[-1] not in family_words:
+        words.discard(trailing.pop())
+
+    if words & set(small):
         return -1
-    if words & set(LARGE_TIER):
+    if words & set(large):
         return 1
     return 0
 
@@ -208,6 +237,7 @@ def rank(route: dict[str, Any], states: dict[str, str], prefer: str) -> tuple:
     priciest entry in the catalog while being the weakest sensible choice.
     """
     model_id = route.get("modelId") or route["selector"]
+    model_tier = tier(model_id, route.get("family", ""))
     base = (
         0 if route["sourceKind"] == "harness" else 1,
         POOL_RANK.get(states.get(route["pool"], "unknown"), 2),
@@ -216,13 +246,13 @@ def rank(route: dict[str, Any], states: dict[str, str], prefer: str) -> tuple:
     if prefer == "capability":
         return base + (
             0 if route.get("reasoning") else 1,
-            -tier(model_id),
+            -model_tier,
             -version_of(model_id),
             -(route.get("contextWindow") or 0),
             route["selector"],
         )
     return base + (
-        tier(model_id),
+        model_tier,
         -version_of(model_id),
         cost_of(route),
         route.get("contextWindow") or 0,
