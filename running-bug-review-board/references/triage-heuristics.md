@@ -10,6 +10,19 @@ The agent **suggests**; the user **decides**. There is no auto-merge.
 Every suggestion cites a named heuristic with text evidence so the user
 always sees *why* something was flagged.
 
+## Contents
+
+- When the agent runs heuristics
+- What the heuristics are NOT
+- Heuristics catalog
+- How the agent presents suggestions
+- Suggestions (4 clusters across 9 bugs)
+- Confirmed-action contract
+- Rejected-suggestion memory (lightweight)
+- Disabling a heuristic
+- Adding a new heuristic
+- Anti-patterns
+
 ## When the agent runs heuristics
 
 | When | Default | Configured via |

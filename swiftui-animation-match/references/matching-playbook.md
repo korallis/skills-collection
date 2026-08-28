@@ -4,6 +4,14 @@ How to go from a fuzzy interaction wish to either a system affordance or a
 specific catalog entry. Work the three steps in order; most requests resolve
 at step 2 without any custom animation.
 
+## Contents
+
+- Step 1: Name the moment
+- Step 2: Check what the system gives you free
+- Step 3: Match into the catalogs
+- Worked examples
+- Anti-patterns
+
 ## Step 1: Name the moment
 
 Users and PMs rarely ask for an animation by name. They say "make saving

@@ -4,6 +4,26 @@ Drive the app like a real user. Whatever tool the agent has, the playbook
 is the same: navigate → snapshot → act on **fresh refs** → capture
 evidence → release the tab when done.
 
+## Contents
+
+- Scope: web apps only
+- Tool ladder (cursor-first)
+- Configuration (`qa-config.json#platforms.web`)
+- The universal flow
+- cursor-ide-browser specifics
+- Chrome DevTools for agents specifics
+- Drive like a real human (don't trip the tests)
+- browser-use specifics
+- Playwright specifics
+- Snapshot vs screenshot — when to use what
+- Responsive spot-checks (mobile / tablet / desktop)
+- Capturing console errors as evidence
+- Network capture
+- Common UI gotchas (universal)
+- Tab discipline (parallel mode)
+- Capturing evidence efficiently
+- When the browser tool itself is broken
+
 ## Scope: web apps only
 
 This playbook covers **web app QA in a browser** — Chrome viewport

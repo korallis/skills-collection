@@ -15,7 +15,8 @@ Audit the change as a system, not as a patch.
    generated artifacts, tests, migrations, docs, telemetry, and failure recovery.
 3. Identify the safety facts that must remain true. Map each fact to evidence or an unresolved risk.
 4. For a very wide change, use `arena` or parallel read-only local reviewers on separate impact
-   areas, then aggregate their findings.
+   areas, then aggregate their findings. Reviewers run on the `review` role from
+   `~/.agents/routing.json` when it exists; otherwise the current model.
 
 ## Prove the result
 

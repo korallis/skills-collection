@@ -1,5 +1,20 @@
 # Worked Example and Decomposition Recipes
 
+## Contents
+
+- Worked Run: Analyze Messages and Build a Roadmap
+- Recipe: Decomposition of a Vague Build
+- Recipe: Data-Chunk Fan-Out
+- Recipe: Multi-Stream Research
+- Recipe: Whole-Repo Audit
+- Recipe: Parallel Implementation
+- Recipe: Implement a Reviewed Plan (Plan -> Edit Wave -> Verify Wave)
+- Recipe: Codemod / Migration Across Many Files (Row-Shaped)
+- Recipe: CI-Failure Triage (Diagnosis, Then One Fix Wave)
+- Wave Shapes
+- Anti-Patterns
+- Grounding (Why Entropy-First Works)
+
 ## Worked Run: Analyze Messages and Build a Roadmap
 
 Goal: read a user's message history, find patterns/goals/frustrations, research

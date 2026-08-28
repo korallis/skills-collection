@@ -79,8 +79,9 @@ configuration when it has one.
 | `verify` | checking claims; also a different family from `implement` |
 
 Selection uses only what the scan carries plus vendor naming convention: harness before CLI, healthy
-pool before constrained, reasoning support, tier words (`nano`/`haiku`/`flash` small,
-`opus`/`pro`/`max` large), and version parsed from the model ID. Price is deliberately not a
+pool before constrained, reasoning support, per-family tier words, and the version parsed from the
+model ID. The tier vocabulary and its first-party evidence live in
+`lee-engineering/references/model-facts.md`; nothing here names a model. Price is deliberately not a
 capability signal, because a legacy flagship is often the priciest entry in the catalog and the worst
 choice.
 

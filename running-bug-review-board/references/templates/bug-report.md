@@ -15,6 +15,19 @@
 
 ---
 
+## Contents
+
+- Summary
+- Impact
+- Risk to fix
+- Steps to reproduce
+- Expected result
+- Actual result
+- Environment details
+- Evidence
+- Notes
+- Triage log
+
 ## Summary
 
 One sentence describing the bug. Also acts as the "deck" in the HTML

@@ -10,6 +10,23 @@ opens the skeleton templates in
 [templates/html-report/](templates/html-report/), and writes
 `docs/qa/report/index.html` + `bugs/BUG-NNN.html` + `runs/<slug>.html`.
 
+## Contents
+
+- Design philosophy
+- Information hierarchy contract
+- Output layout
+- Versioning
+- Design tokens (canonical)
+- Component recipes
+- Mobile-first rules
+- Desktop rules
+- Accessibility
+- Rendering rules
+- When the agent is asked to "refresh the report"
+- Notes on the bug template
+- Why this redesign
+- Extending the style guide
+
 ## Design philosophy
 
 **Zite + Dieter Rams. Less, but better.**

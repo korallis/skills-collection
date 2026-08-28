@@ -5,6 +5,19 @@ ship with provider-specific dev/test modes that issue free credentials
 without sending real emails or charging cards. This reference catalogs
 common providers; if yours isn't listed, **ask the user**.
 
+## Contents
+
+- The "ask the user" pattern
+- Email suffix pattern (universal)
+- Provider playbook
+- Payment provider test credentials
+- SMS / Phone test fixtures
+- Storing credentials
+- Persona -> permission mapping
+- Fresh-user vs returning-user accounts
+- After provisioning
+- Shared test artifacts
+
 ## The "ask the user" pattern
 
 If the repo doesn't document a test account playbook, ask **before

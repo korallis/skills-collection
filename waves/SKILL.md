@@ -15,9 +15,8 @@ Model choice comes from `~/.agents/routing.json` (written by the
 `implement`, reviewers and verifiers on `review`/`verify`, which setup
 guarantees sit in a different model family. A role with no assignment, or no
 routing file, means workers run on the current model — the wave still works.
-`~/.agents/routes.json` holds the full scan when a slice needs a specific
-capability; a vendor CLI is a fallback only for a family or capability the
-harness cannot provide.
+`~/.agents/routes.json` holds the full scan for capability-specific slices; a
+vendor CLI is a fallback only for what the harness cannot provide.
 
 A **wave** is a bounded round of isolated workers in parallel, then a round
 that verifies what came back, then a deliberate decision to build on it —
@@ -284,9 +283,10 @@ summarize/synthesize. Dispatch each worker the way this harness dispatches
 workers. Recursion (workers spawning workers) is off by default;
 manager-driven sequential waves are the encouraged shape.
 
-Pick the smallest capable role, then pick a route from
-`~/.agents/routes.json` (after `bin/agent-routes scan`) for that role,
-preferring `sourceKind: harness`:
+Pick the smallest capable role. Model choice per role comes from
+`~/.agents/routing.json` (`scout`, `implement`, `review`, `verify`); no
+routing file means every role runs on the current model. Consult
+`~/.agents/routes.json` only for a slice needing a specific capability:
 
 | Slice | Role | Notes |
 | --- | --- | --- |
@@ -307,9 +307,10 @@ Route by role, not by a hardcoded model slug. Scouting and read-heavy slices
 use a cheaper/faster harness route; implementation, verification, and
 synthesis use capable routes; independent review uses a different `family`
 from the author. Honor any model the user named; if that model is unavailable,
-say so rather than substituting. Pins are advisory: verify the model that
-actually ran (check each worker's reported model, or judge by output quality)
-instead of trusting the requested settings. A vendor CLI is a fallback only
+say so rather than substituting. Pins are advisory: take the model that
+actually ran from the harness's run metadata or the worker's reported model.
+Output quality is not evidence of identity — a worker whose model cannot be
+read back has `family: unknown` and cannot satisfy an independence gate. A vendor CLI is a fallback only
 for a family or capability the harness cannot provide. `family` decides
 review independence; `pool` decides scheduling.
 

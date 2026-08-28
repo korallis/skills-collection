@@ -4,6 +4,22 @@ Use when running a fresh full pass with multiple QA agents. Lessons from
 real runs are baked in: **the write-path shard runs first** to seed
 shared test data, and shards do not share a browser tab.
 
+## Contents
+
+- When to use
+- When NOT to use
+- Pre-flight (coordinator only)
+- Shard map (generalize per phase)
+- Write-path-first rule
+- Launching shards
+- Run the pass as a wave (when `waves` / `waves-codex` is installed)
+- While shards run
+- Hand off if shards stall
+- Merge
+- Common pitfalls (observed)
+- Shard prompt
+- Coordinator self-check before merging
+
 ## When to use
 
 - Phase is freshly implemented and needs a full pass
@@ -116,9 +132,11 @@ correspondences and the QA-specific overrides:
   backend-write scenario against the backend row (optimistic UI lies).
   Spend coordinator time where a wrong verdict is expensive.
 - **Cheap-model routing.** Read-heavy, low-risk shards (public pages,
-  copy checks, static negative tests) can run on the fast/cheap model;
+  copy checks, static negative tests) can run on the `scout` role from
+  `~/.agents/routing.json` (no routing file: the current model);
   keep the write-path shard, anything auth-heavy, and the merge/verdict
-  on the strong model. Browser-driving shards stay serial *within* the
+  on the `implement` role, and independent re-verification on `verify`.
+  Browser-driving shards stay serial *within* the
   shard — never fan out extra browser workers inside one shard.
 - **Failure ladder before sequential fallback.** A stalled or partial
   shard: (1) re-launch once, narrowed to its unfinished Test IDs with a

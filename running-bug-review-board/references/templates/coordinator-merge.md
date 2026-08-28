@@ -1,5 +1,20 @@
 # QA Coordinator Merge — Phase {N} — {YYYY-MM-DD}
 
+## Contents
+
+- Verdict
+- Run setup
+- Shard completion
+- Critical paths (coordinator-verified)
+- Regression matrix
+- Bugs filed this pass
+- Tracker sync (this pass)
+- Generated artifacts
+- Sign-off criteria
+- Recommended next steps
+- Process notes
+- Related
+
 ## Verdict
 
 **Phase {N} ready?** YES / NO

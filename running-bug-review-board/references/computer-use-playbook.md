@@ -12,6 +12,17 @@ real customer would*. Computer Use is the highest-fidelity way to do that on
 a Mac — it uses the real, signed-in app and real rendering — and it is the
 **only** way this skill can reach a native macOS desktop app at all.
 
+## Contents
+
+- Table of contents
+- When to use it (and when not to)
+- Detect availability before relying on it
+- Enabling it
+- The driving loop
+- Using it in a QA pass
+- Safety and hygiene
+- Graceful degradation
+
 ## Table of contents
 
 - [When to use it (and when not to)](#when-to-use-it-and-when-not-to)
@@ -38,8 +49,8 @@ when it helps or is required; iOS app QA defers to the simulator playbook.**
 
 ## Detect availability before relying on it
 
-Computer Use is a macOS-only Codex capability, and the user must have
-installed and permissioned it. Treat it as *probably absent* and confirm
+Desktop-driving capability varies by harness, platform, and what the user
+has installed and permissioned. Treat it as *probably absent* and confirm
 before you plan around it — never assume, the same way the skill never
 assumes an issue tracker.
 

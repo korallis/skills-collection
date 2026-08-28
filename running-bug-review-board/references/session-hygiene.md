@@ -8,6 +8,19 @@ hygiene serves both goals.
 This is the reference that pays the most dividends. Read it once, apply
 it religiously.
 
+## Contents
+
+- The five hygiene rules
+- Why this matters — the BUG-001 case study
+- Pre-scenario checklist
+- Clearing storage by browser tool
+- Auth provider rate limits — known patterns
+- Session hygiene + parallel mode
+- Detecting stale state mid-scenario
+- Resetting between phases / blocks
+- Persona suffix discipline
+- When to declare hygiene a bug, not a process issue
+
 ## The five hygiene rules
 
 1. **Fresh user = fresh storage.** Before any "fresh user" or "no

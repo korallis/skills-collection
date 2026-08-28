@@ -4,6 +4,20 @@ The plan is the contract between engineering, QA, and product. Generate
 **before** testing. Even a 30-minute draft beats no plan — agents pick
 the wrong scenarios when winging it.
 
+## Contents
+
+- Filename + location
+- Derive scenarios from four inputs
+- Scenario ID scheme
+- Required sections
+- How to write a single scenario row
+- Personas to enumerate up-front
+- Map each scenario to one of these intents
+- Regression matrix when needed
+- Architecture reference table
+- After generating the plan
+- When in doubt about a scenario
+
 ## Filename + location
 
 ```
