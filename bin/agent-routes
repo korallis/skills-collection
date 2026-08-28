@@ -41,9 +41,12 @@ def routes_path() -> Path:
 # Model family
 # --------------------------------------------------------------------------
 
-# Ordered: the first pattern that matches wins. `grok` precedes `composer`
-# because xAI ships `grok-composer-*`, which is Grok lineage; Cursor's bare
-# `composer-*` is its own lineage and must not be folded into GPT.
+# Ordered: the first pattern that matches wins. Verified against first-party
+# vendor docs on 2026-08-28; see lee-engineering/references/model-facts.md.
+#
+# `grok` precedes `composer` because xAI serves `grok-composer-*`, which is Grok
+# lineage. Cursor's bare `composer-*` is its own line, built on a Kimi
+# checkpoint by Cursor's own account, so it is neither GPT nor Kimi here.
 FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"claude|sonnet|opus|haiku|fable|mythos", "claude"),
     (r"gemini", "gemini"),
@@ -53,10 +56,14 @@ FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bglm", "glm"),
     (r"deepseek", "deepseek"),
     (r"qwen", "qwen"),
-    (r"llama", "llama"),
-    (r"mistral|codestral|devstral", "mistral"),
+    # Meta ships two lines: Llama and the newer Muse.
+    (r"llama|behemoth|maverick", "llama"),
+    (r"\bmuse[-_]|glimmer", "muse"),
+    # Mistral's small line is `ministral`, which does NOT contain "mistral", and
+    # its specialist models share the `-stral` suffix.
+    (r"mistral|ministral|codestral|devstral|voxtral|leanstral|shieldstral|\w+stral", "mistral"),
     (r"minimax", "minimax"),
-    (r"gpt|codex|(^|/)o[1345](-|$|\b)|davinci", "gpt"),
+    (r"gpt|codex|daybreak|(^|/)o[1345](-|$|\b)|davinci", "gpt"),
 )
 
 

@@ -21,8 +21,10 @@ copy on disk.
 
 ## What the scan can and cannot tell you
 
-`bin/agent-routes` reads a model list from any CLI that exposes one. None of the vendor CLIs expose a
-machine-readable account meter, so their pools come back `unknown`. Treat an unknown pool as one
+`bin/agent-routes` reads a model list from any CLI that exposes one: `grok models` and
+`cursor-agent models` both list the authenticated account's models, and `grok inspect --json` reports
+discovered configuration rather than models, so it is not wired into discovery. None of the vendor
+CLIs expose a machine-readable account meter, so their pools come back `unknown`. Treat an unknown pool as one
 small packet, then re-scan. Do not infer remaining quota from a successful call.
 
 A CLI that is installed but publishes no model list is recorded in `sources` with that reason. That
@@ -37,20 +39,30 @@ When a Grok CLI route is the admitted fallback, launch it through the installed 
   caller-supplied `--always-approve`.
 - `lee-grok-review` — fixed-artifact read-only review. Pins low reasoning, keeps approve mode,
   disables memory, planning, subagents, web access, and built-in tools, limits the run to one turn,
-  and emits streaming Messages JSON.
+  and emits streaming Messages JSON. Every component is first-party documented: `--effort low`
+  (alias `--reasoning-effort`), `--no-memory`, `--no-plan`, `--no-subagents`,
+  `--disable-web-search`, `--disallowed-tools`, `--max-turns 1`,
+  `--output-format streaming-messages-json`, and optionally `--sandbox read-only`.
+  https://docs.x.ai/build/cli/reference
 - `lee-cursor-grok` — Cursor-backed Grok worker. Pins the model and injects `--force`, rejecting
   caller-supplied model, mode, force, yolo, and auto-review flags.
 
-The user-level Grok configuration must also contain exactly:
+The user-level Grok configuration must also contain exactly the following. It is user-scoped: a
+project `.grok/config.toml` cannot set it, and the legacy `approval_mode` and `yolo` keys are still
+accepted but lose to `permission_mode`.
 
 ```toml
 [ui]
 permission_mode = "always-approve"
 ```
 
-`--permission-mode acceptEdits` is forbidden: Grok CLI 1.0.5 returned `stopReason: cancelled` before
-its first edit tool call under that mode, while the same fixed probe completed with
-`--always-approve`.
+Do not use `--permission-mode acceptEdits` for an unattended run. The mode exists and is documented,
+but xAI positions it for interactive local coding and steers scripts, SDKs and CI to always-approve;
+its own headless example uses `--permission-mode dontAsk` with explicit `--allow` rules. A prior
+observation of `stopReason: cancelled` before the first edit tool call under `acceptEdits` on Grok
+CLI 1.0.5 is corroborated only by community reports, not by vendor documentation, so treat it as
+unverified rather than as a known defect.
+https://docs.x.ai/build/features/permissions
 
 For a large review artifact, split it into named immutable slices and put the whole-artifact
 fingerprint in every packet. Do not wrap a short watchdog around non-streaming `json`: Grok can
