@@ -58,6 +58,13 @@ AGENTS_FILES: tuple[tuple[str, str], ...] = (
 )
 
 
+# Roots that resolve onto an already-targeted directory. A harness root is
+# often a symlink to the shared `.agents` location, so linking it again would
+# be redundant. Recorded rather than dropped silently, so `status` can show
+# that the harness is in fact covered.
+ALIASES: dict[Path, list[Path]] = {}
+
+
 class UnsafeRoot(RuntimeError):
     """A target root would damage the collection it is supposed to serve."""
 
@@ -115,13 +122,15 @@ def target_roots(extra: list[str], source_root: Path) -> list[Path]:
     ]
     roots.extend(Path(item).expanduser() for item in extra)
 
-    seen: set[Path] = set()
+    seen: dict[Path, Path] = {}
     checked = []
     for root in roots:
         resolved = check_root(root, source_root)
         if resolved not in seen:
-            seen.add(resolved)
+            seen[resolved] = root
             checked.append(root)
+        elif seen[resolved] != root:
+            ALIASES.setdefault(seen[resolved], []).append(root)
     return checked
 
 
@@ -437,7 +446,14 @@ def status(roots: list[Path], sources: list[Path]) -> list[dict[str, Any]]:
             if root.is_dir()
             else 0
         )
-        report.append({"root": str(root), "states": states, "danglingExtras": stale})
+        report.append(
+            {
+                "root": str(root),
+                "states": states,
+                "danglingExtras": stale,
+                "aliases": [str(alias) for alias in ALIASES.get(root, [])],
+            }
+        )
     return report
 
 
@@ -495,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"  (+{entry['danglingExtras']} dangling)" if entry["danglingExtras"] else ""
             )
             print(f"  {entry['root']:<34} {summary}{extras}")
+            for alias in entry["aliases"]:
+                print(f"  {'':<34} also reached as {alias}")
         if any(
             state in ("directory", "file", "linked-elsewhere", "broken-link")
             for entry in report
