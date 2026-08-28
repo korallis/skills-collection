@@ -183,9 +183,10 @@ Prefer direct oracles over prose review:
   of the cost); the verifier does not need to be frontier-class when it has an
   oracle to consult.
 - Panel / multi-pass cross-check: for a high-stakes or contested claim, run it
-  across several independent passes (or the `review`/`verify` roles when a
-  routing file provides different families) and synthesize consensus vs
-  lone-result. That extra spawning is worth it
+  across several independent passes, using the `review`/`verify` roles when a
+  routing file provides different families; with no routing file the passes run
+  on the current model and count as same-family, not independent. Synthesize
+  consensus vs lone-result. That extra spawning is worth it
   for claims the deliverable hinges on.
 
 For docs/current behavior, use primary sources first. For current product or API
