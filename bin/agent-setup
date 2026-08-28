@@ -20,6 +20,7 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -96,8 +97,16 @@ def main(argv: list[str] | None = None) -> int:
     if not arguments.dry_run:
         run("agent-skills", *home_args, "prune")
 
+    # `scan` always writes its routes file. In a dry run, send it to a throwaway
+    # path so the real one is untouched, and have the next step read that.
+    scan_env: dict[str, str] = {}
+    if arguments.dry_run:
+        scratch = Path(tempfile.mkdtemp(prefix="agent-setup-dry-")) / "routes.json"
+        scan_env["AGENT_ROUTES_FILE"] = str(scratch)
+        config_env.setdefault("AGENT_ROUTES_FILE", str(scratch))
+
     heading(2, 3, "Scanning for models this account can reach")
-    if run("agent-routes", "scan") != 0:
+    if run("agent-routes", "scan", env=scan_env) != 0:
         print(
             "\nNo routes found. If you are inside a harness this is unexpected;\n"
             "report the source list above rather than assuming a model.",
@@ -110,7 +119,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if arguments.dry_run:
-        print("\nDry run: nothing was written.")
+        print(
+            "\nDry run: nothing was written. The scan ran against a throwaway routes "
+            "file, so the real one is unchanged."
+        )
         return 0
 
     print(

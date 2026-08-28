@@ -43,6 +43,7 @@ echo "  $(git -C "$CLONE" rev-parse --short HEAD)  $(git -C "$CLONE" log -1 --pr
 
 step "1. Install the skills into a fresh HOME"
 mkdir -p "$SANDBOX/home/.claude" "$SANDBOX/home/.cursor" "$SANDBOX/home/.codex" "$SANDBOX/home/.omp/agent"
+# The current harness's own skills root must be managed too, not left to luck.
 printf '# Shared rules\nBe careful.\n' > "$SANDBOX/home/.omp/agent/AGENTS.md"
 mkdir -p "$SANDBOX/home/.claude/skills/architect"
 printf 'my own architect skill\n' > "$SANDBOX/home/.claude/skills/architect/SKILL.md"
@@ -61,7 +62,7 @@ check "the moved-aside copy still holds the user's file" \
   "$(grep -rq irreplaceable "$SANDBOX/home/.claude/skills"/architect.replaced-* && echo 0 || echo 1)"
 
 expected=$(find "$CLONE" -maxdepth 2 -name SKILL.md | wc -l | tr -d ' ')
-for root in .agents/skills .claude/skills .cursor/skills .codex/skills; do
+for root in .agents/skills .omp/agent/skills .claude/skills .cursor/skills .codex/skills; do
   n=$(find "$SANDBOX/home/$root" -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')
   check "$root holds $expected symlinks (got $n)" "$([ "$n" -eq "$expected" ] && echo 0 || echo 1)"
 done
@@ -160,6 +161,28 @@ printf '{"review": "%s"}\n' "$same" > "$SANDBOX/agents/roles.overrides.json"
 check "same-family pin ignored, with a reason" "$(grep -q 'ignoring pin' "$SANDBOX/pin.log" && echo 0 || echo 1)"
 grep 'ignoring pin' "$SANDBOX/pin.log" | sed 's/^/  /'
 rm -f "$SANDBOX/agents/roles.overrides.json"
+
+step "4. Every documented discovery location resolves to a real skill"
+# Read-only, against real state. Asserted per provider path that the harnesses
+# document, because a link is only useful if it lands on a valid SKILL.md whose
+# declared name matches the directory the harness will key on.
+for root in .agents/skills .omp/agent/skills .claude/skills .codex/skills .cursor/skills; do
+  target=$HOME/$root/lee-engineering
+  ok=1
+  if [ -L "$target" ] && [ -f "$target/SKILL.md" ] &&
+     grep -q '^name: lee-engineering$' "$target/SKILL.md"; then ok=0; fi
+  check "$root/lee-engineering resolves to a valid skill" "$ok"
+done
+
+step "4b. --dry-run writes nothing at all"
+DRY_BEFORE=$(shasum -a 256 "$HOME/.agents/routes.json" 2>/dev/null | cut -d' ' -f1)
+"$CLONE/bin/agent-setup" --dry-run --skills-home "$SANDBOX/dryhome" >"$SANDBOX/dry.log" 2>&1
+check "dry run leaves the real routes file untouched" \
+  "$([ "$(shasum -a 256 "$HOME/.agents/routes.json" 2>/dev/null | cut -d' ' -f1)" = "$DRY_BEFORE" ] && echo 0 || echo 1)"
+check "dry run creates no skill links" \
+  "$([ "$(find "$SANDBOX/dryhome" -type l 2>/dev/null | wc -l | tr -d ' ')" -eq 0 ] && echo 0 || echo 1)"
+check "dry run says so honestly" \
+  "$(grep -q 'nothing was written' "$SANDBOX/dry.log" && echo 0 || echo 1)"
 
 step "5. Confirm nothing real was modified"
 check "real omp config.yml unchanged" \

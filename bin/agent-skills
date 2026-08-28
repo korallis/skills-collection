@@ -36,6 +36,10 @@ NON_SKILL_ENTRIES = {"bin", "licenses", ".git", ".github", "tests"}
 # already present, so nothing is created for a harness the user does not have.
 HARNESS_ROOTS: tuple[tuple[str, str | None], ...] = (
     (".agents/skills", None),
+    # omp's own native provider sits at priority 100, above the shared
+    # `.agents` location, so it must be managed too or a stale entry there
+    # would shadow the linked one.
+    (".omp/agent/skills", ".omp"),
     (".claude/skills", ".claude"),
     (".cursor/skills", ".cursor"),
     (".codex/skills", ".codex"),
