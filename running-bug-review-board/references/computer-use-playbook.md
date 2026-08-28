@@ -38,8 +38,8 @@ when it helps or is required; iOS app QA defers to the simulator playbook.**
 
 ## Detect availability before relying on it
 
-Computer Use is a macOS-only Codex capability, and the user must have
-installed and permissioned it. Treat it as *probably absent* and confirm
+Desktop-driving capability varies by harness, platform, and what the user
+has installed and permissioned. Treat it as *probably absent* and confirm
 before you plan around it — never assume, the same way the skill never
 assumes an issue tracker.
 
@@ -50,11 +50,10 @@ Signals (observe, don't force anything):
   browser driver.
 - **Codex present.** `command -v codex` resolves, or the session is running
   inside the Codex app / desktop on macOS.
-- **Plugin installed.** `codex mcp list` shows a `computer-use` server. (The
-  CLI path is still maturing; today Computer Use is primarily an app/desktop
-  capability — verify in your Codex surface.)
-- **Region.** At release it isn't offered in the EEA, the UK, or Switzerland.
-  If the user is there, plan without it. *(Check current Codex docs — this
+- **Plugin installed.** `codex mcp list` shows a `computer-use` server.
+  (Support differs by surface — verify in the surface you are on.)
+- **Region.** Regional availability varies and changes; plan without the
+  capability until confirmed. *(Check current vendor docs — this
   changes.)*
 
 If any signal is missing, say so plainly and continue with the browser

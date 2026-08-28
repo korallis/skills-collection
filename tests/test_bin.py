@@ -10,6 +10,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -570,6 +571,73 @@ class ConfigWriterSafety(unittest.TestCase):
         merged = {**current, **{"plan": "new/model"}}
         self.assertEqual(merged["custom"], "x/y")
         self.assertEqual(merged["plan"], "new/model")
+
+
+class ModelAgnosticism(unittest.TestCase):
+    """No versioned model slug outside the classified surfaces.
+
+    The user requirement is that skills are completely model agnostic. Slugs go
+    stale and get copied; families and roles do not. Every allowed file below
+    carries its reason, so the next reviewer can re-judge the exemption.
+    """
+
+    SLUG = re.compile(
+        # A family word followed, optionally through one tier/series word, by a
+        # version: gpt-5, qwen3.8-max, minimax-m1, deepseek-r1, mistral-small-3.2.
+        r"\b(?:claude|gpt|grok|gemini|kimi|glm|composer|sonnet|opus|haiku|fable|mythos"
+        r"|llama|deepseek|qwen|mistral|ministral|codestral|muse|spark|glimmer|minimax)"
+        r"(?:-[a-z]+)?[-.]?v?[0-9]"
+        # OpenAI o-series: o1, o3-mini, o4.
+        r"|\bo[134][0-9]?\b",
+        re.I,
+    )
+    ALLOWED = {
+        "tests/test_bin.py": "test fixtures asserting parsing and ranking behaviour",
+        "lee-engineering/references/model-facts.md": "the dated evidence register; slugs are its subject",
+        "waves/references/recommended-config.md": "labelled per-harness example appendix",
+        "waves/references/adaptation-notes.md": "dated historical research notes",
+        "bin/agent-roles": "code comments citing the evidence behind tier rules",
+        "bin/agent-routes": "code comments citing the evidence behind family rules",
+        "lee-engineering/scripts/lee-grok-review": "fallback default, overridable via LEE_GROK_REVIEW_MODEL",
+        "lee-engineering/scripts/lee-cursor-grok": "fallback default, overridable via LEE_CURSOR_GROK_MODEL",
+    }
+
+    def tracked_files(self) -> list[str]:
+        out = subprocess.run(
+            ["git", "ls-files"], capture_output=True, text=True, cwd=ROOT, check=True
+        ).stdout.split()
+        return [f for f in out if not f.endswith((".png", ".jpg", ".csv"))]
+
+    def test_no_model_slug_outside_classified_surfaces(self) -> None:
+        offenders = {}
+        for name in self.tracked_files():
+            if name in self.ALLOWED:
+                continue
+            try:
+                text = (ROOT / name).read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            found = sorted(set(self.SLUG.findall(text)))
+            if found:
+                offenders[name] = found
+        self.assertEqual(offenders, {}, f"model slugs outside classified surfaces: {offenders}")
+
+    def test_every_skill_body_is_slug_free_no_exemptions(self) -> None:
+        """SKILL.md files get no allowlist at all."""
+        for skill in sorted(ROOT.glob("*/SKILL.md")):
+            with self.subTest(skill=str(skill)):
+                self.assertEqual(self.SLUG.findall(skill.read_text(encoding="utf-8")), [])
+
+    def test_allowlist_entries_still_exist_and_still_hit(self) -> None:
+        """A stale exemption is a hole; prune it when the file goes clean."""
+        for name in self.ALLOWED:
+            path = ROOT / name
+            with self.subTest(name=name):
+                self.assertTrue(path.is_file(), f"{name} vanished; prune the allowlist")
+                self.assertTrue(
+                    self.SLUG.search(path.read_text(encoding="utf-8")),
+                    f"{name} no longer contains a model slug; prune its exemption",
+                )
 
 
 class CollectionIntegrity(unittest.TestCase):

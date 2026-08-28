@@ -15,8 +15,12 @@ Use competing local candidates only when diversity is worth the additional work.
 
 ## Run candidates
 
-- Use harness-native local subagents or locally installed model CLIs. Never claim a named model was
-  consulted unless it actually ran.
+- Dispatch candidates as harness-native subagents. For model choice, read `~/.agents/routing.json`
+  (written by the `setup-lee-engineering` skill): candidates run on the `implement` role, judges on
+  `review`, which setup guarantees is a different model family. No routing file, or a role with no
+  assignment, means run on the current model — the arena still works, with less diversity.
+- A separately installed model CLI is an optional extra lens, never a requirement. Never claim a
+  named model was consulted unless it actually ran.
 - Isolate implementation candidates in separate branches or worktrees. One writer owns each.
 - Keep candidates bounded; they should return artifacts and evidence, not lengthy process diaries.
 - Do not allow candidates to merge, push, deploy, or mutate shared external state unless the user

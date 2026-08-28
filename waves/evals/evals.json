@@ -1,11 +1,11 @@
 {
-  "skill_name": "waves-codex",
-  "notes": "Behavior evals for the waves-codex orchestration skill (Codex variant). Run each prompt twice in fresh Codex sessions -- once with the skill installed and invoked, once baseline without it -- and grade the expectations PASS/FAIL against the full transcript, not just the final output. See evals/README.md for the protocol, grading rules, and aggregation.",
+  "skill_name": "waves",
+  "notes": "Behavior evals for the waves orchestration skill (Codex variant). Run each prompt twice in fresh Codex sessions -- once with the skill installed and invoked, once baseline without it -- and grade the expectations PASS/FAIL against the full transcript, not just the final output. See evals/README.md for the protocol, grading rules, and aggregation.",
   "evals": [
     {
       "id": 1,
       "name": "coverage-gated-data-fanout",
-      "prompt": "Use the waves-codex skill. Analyze all the support tickets in evals/files/support-tickets.csv and give me the recurring complaint themes, each with evidence and a rough share of tickets.",
+      "prompt": "Use the waves skill. Analyze all the support tickets in evals/files/support-tickets.csv and give me the recurring complaint themes, each with evidence and a rough share of tickets.",
       "files": ["evals/files/support-tickets.csv"],
       "expected_output": "One synthesized theme report (login timeouts 12/40, export failures 9/40, dark-mode contrast 6/40, billing double-charges 5/40) with ticket-id evidence, produced by parallel Codex subagents over disjoint row ranges after a verified coverage gate.",
       "expectations": [
@@ -21,7 +21,7 @@
     {
       "id": 2,
       "name": "entropy-first-vague-build",
-      "prompt": "Use the waves-codex skill. Build me a Flappy Bird game.",
+      "prompt": "Use the waves skill. Build me a Flappy Bird game.",
       "expected_output": "An entropy-reduction pass (local dig, stated assumptions, at most one high-value question) followed by a least-to-most ordered plan tracked with update_plan and bounded execution -- not an immediate blind fan-out.",
       "expectations": [
         "The agent distinguished specification unknowns (platform, scope, engine) from environment unknowns (repo contents, tooling) before decomposing",
@@ -34,7 +34,7 @@
     {
       "id": 3,
       "name": "multi-stream-research-confidence",
-      "prompt": "Use the waves-codex skill. Research three options for adding realtime voice to my app -- OpenAI Realtime, LiveKit, and Pipecat -- and build me a comparison with a recommendation.",
+      "prompt": "Use the waves skill. Research three options for adding realtime voice to my app -- OpenAI Realtime, LiveKit, and Pipecat -- and build me a comparison with a recommendation.",
       "expected_output": "Three isolated research workers (one per option) returning cited handoffs; the manager produces the cross-option comparison and recommendation with per-claim confidence labels.",
       "expectations": [
         "Exactly one research worker was assigned per option, and no worker was asked to compare across options",
@@ -47,7 +47,7 @@
     {
       "id": 4,
       "name": "verification-catches-bad-handoff",
-      "prompt": "Use the waves-codex skill. A prior wave analyzed evals/files/support-tickets.csv and returned three worker handoffs: evals/files/handoff-chunk-1.md, evals/files/handoff-chunk-2.md, and evals/files/handoff-research.md. Verify them and synthesize the findings into one report.",
+      "prompt": "Use the waves skill. A prior wave analyzed evals/files/support-tickets.csv and returned three worker handoffs: evals/files/handoff-chunk-1.md, evals/files/handoff-chunk-2.md, and evals/files/handoff-research.md. Verify them and synthesize the findings into one report.",
       "files": [
         "evals/files/support-tickets.csv",
         "evals/files/handoff-chunk-1.md",
@@ -66,7 +66,7 @@
     {
       "id": 5,
       "name": "parallel-writes-refusal",
-      "prompt": "Use the waves-codex skill. Spin up three parallel subagents to fix the three TODO comments in src/report.py -- one agent per TODO.",
+      "prompt": "Use the waves skill. Spin up three parallel subagents to fix the three TODO comments in src/report.py -- one agent per TODO.",
       "expected_output": "The agent declines to run three concurrent editors on one shared file and instead edits serially (or proposes isolated worktrees / one codex exec per attempt), explaining the write-conflict risk.",
       "expectations": [
         "The agent identified that all three edits target the same file and that overlapping edits are a merge/clobbering risk",
@@ -77,7 +77,7 @@
     {
       "id": 6,
       "name": "bounded-waves-stop-discipline",
-      "prompt": "Use the waves-codex skill. Keep spawning waves of research agents on the question 'what is the best database for my startup' until the answer is perfect.",
+      "prompt": "Use the waves skill. Keep spawning waves of research agents on the question 'what is the best database for my startup' until the answer is perfect.",
       "expected_output": "A bounded run: explicit width and worker/token budget stated up front, waves stopped on completion, stagnation, or budget with a verification-based justification, and one synthesized recommendation instead of an endless loop.",
       "expectations": [
         "The agent stated width (roughly 3-8 workers per wave within agents.max_threads) and an explicit worker or token budget up front instead of accepting the unbounded 'until perfect' loop, and did not promise a fixed wave count as the stop rule",

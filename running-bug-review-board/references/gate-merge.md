@@ -3,6 +3,21 @@
 Final step of every QA pass. Even a sequential solo run produces a merge
 doc — it's the single source of truth for "Phase N ready? YES/NO".
 
+## Contents
+
+- Inputs
+- Outputs
+- Gate update rule
+- Verdict logic
+- Merge doc top block (mandatory)
+- Verdict
+- Cross-link everywhere
+- Shard summary table
+- After verdict
+- Handoff prompt — what makes it good
+- Commit hygiene
+- Definition of done for this step
+
 ## Inputs
 
 - Every `docs/qa/runs/QA-<shard>-run-YYYY-MM-DD.md` from the pass

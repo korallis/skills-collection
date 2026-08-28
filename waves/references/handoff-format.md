@@ -5,6 +5,37 @@ intermediate output may be invisible, noisy, or too expensive for the manager to
 reconstruct. End every worker prompt by pasting one of these templates and
 saying "Use exactly this structure."
 
+## Contents
+
+- Research / Analysis Worker
+- Status
+- Scope
+- Coverage
+- Key findings
+- Sources
+- Confidence & verification
+- Open questions / gaps
+- Suggested follow-ups
+- Code / Edit Worker
+- Status
+- Changed
+- Verification
+- Confidence & risk
+- Notes & deviations
+- Suggested follow-ups
+- Verifier Worker
+- Status
+- Scope
+- Verdict per claim
+- Overall
+- Gaps
+- CSV Batch Worker Result
+- Prompt Endings per Worker Type
+- How the Manager Reads a Handoff
+- Why a Fixed Shape
+- Carrying a Handoff Into the Next Wave
+- Worker prompt packet
+
 ## Research / Analysis Worker
 
 Use this for data analysis, web/MCP research, code reading, audits, test
@@ -211,3 +242,29 @@ wave manifest, stop conditions/budget, and safety/scope rules travel verbatim
 through every synthesis file and compaction -- measured compaction behavior
 silently drops in-context constraints (violations rising from 0% to 30-59%
 post-compaction; pinning restores 0% -- arXiv 2606.22528).
+
+## Worker prompt packet
+
+Every worker is a bounded session. Dispatch it the way this harness dispatches
+workers. The packet is self-contained and includes:
+
+1. Objective (overall goal as context only).
+2. Non-goals: avoid owning the whole task, avoid sibling scopes, avoid editing
+   unless explicitly assigned.
+3. The worker's exact slice and ownership.
+4. Permitted paths / where to look: paths, data ranges, URLs, MCP/docs sources,
+   commands, or repo modules.
+5. Acceptance: coverage rule (read the assigned slice completely when feasible,
+   report counts read such as `388/388`, and call out skipped files/ranges) and
+   evidence rule (cite-or-drop every important claim, tag confidence
+   (`high|med|low`), and say what would change the conclusion).
+6. The worker's role from `~/.agents/routing.json` (`scout`, `implement`,
+   `review`, or `verify`), or a `routeId` from `~/.agents/routes.json` when
+   the slice needs a specific capability. No routing file: current model.
+7. The required return shape from this file - and keep
+   it a digest: roughly 15 findings max with one-line evidence each; large
+   artifacts (tables, logs, full lists) go to a file, cite the path.
+
+End every worker prompt with the copy-paste ending for its worker type
+(generic, research, implementation, or verifier) from § "Prompt endings per
+worker type" above.

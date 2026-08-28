@@ -11,6 +11,18 @@
 
 ---
 
+## Contents
+
+- Pre-BRB pull summary
+- Suggestions disposition
+- Decisions
+- Re-tests this session
+- Cross-bug observations
+- Tracker sync
+- Action items
+- Recommended follow-up auto QA pass
+- Related
+
 ## Pre-BRB pull summary
 
 | Metric | Count |

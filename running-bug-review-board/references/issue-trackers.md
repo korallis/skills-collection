@@ -9,6 +9,20 @@ The skill never assumes a tracker silently. Even when signals are
 obvious, the agent surfaces what it found and asks before writing
 `docs/qa/qa-config.json`.
 
+## Contents
+
+- Why sync at all
+- Discovery ceremony (do this once per repo)
+- Adapter — Linear (first-class)
+- Adapter — GitHub Issues (first-class)
+- Adapter — Jira (templated)
+- Adapter — Notion (templated)
+- When to sync
+- Bi-directional sync
+- Sync surface in run + merge docs
+- Anti-patterns
+- Extending — adding a new tracker
+
 ## Why sync at all
 
 Markdown alone is honest but isolated. Engineering's PRs, standups, and

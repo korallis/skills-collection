@@ -4,6 +4,16 @@ Bad QA happens when the agent invents tests from the code instead of from
 **what the customer is hired to do with the app**. Before writing a
 single scenario, spend 10–20 minutes discovering intent.
 
+## Contents
+
+- What to read (in priority order)
+- What to extract (mental notes)
+- Asking the user (when docs are thin)
+- Build a mental model of routes / surfaces
+- Identify high-pain-point bugs before testing
+- Architecture / pattern files to read
+- Output of the discovery step
+
 ## What to read (in priority order)
 
 | Source | Yields |

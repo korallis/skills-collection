@@ -9,6 +9,16 @@ The output contract is fixed so every catalog reads the same way: one
 `references/catalog-<owner>-<repo>.md` per source, entries grouped by
 interaction moment, each entry in the standard block format below.
 
+## Contents
+
+- 1. Stage the source
+- 2. Survey and slice
+- 3. The entry block format
+- 4. Assemble the catalog file
+- 5. Register the source
+- 6. Verify before shipping
+- Refreshing an existing source
+
 ## 1. Stage the source
 
 ```bash

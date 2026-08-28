@@ -3,6 +3,23 @@
 A bug is only useful if engineering can act on it. Use the template,
 link the Test ID, file immediately on FAIL.
 
+## Contents
+
+- Severity (BRB taxonomy)
+- Filing steps
+- Title style
+- Steps to reproduce
+- Expected vs Actual
+- Expected
+- Actual
+- Evidence
+- Notes section
+- After filing
+- Re-test workflow
+- Status transitions
+- Anti-patterns
+- Bug review board (BRB) cadence
+
 ## Severity (BRB taxonomy)
 
 | Level | Definition | Action |

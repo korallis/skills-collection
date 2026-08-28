@@ -6,6 +6,18 @@ section, fill it in, the agent picks it up on the next session.
 
 This reference is the contributor's map.
 
+## Contents
+
+- Skill anatomy
+- Add a new issue tracker
+- Add a new triage heuristic
+- Add a new surface
+- Add a new mode
+- Bump the skill version
+- Where to ask before contributing
+- Style guide for new docs
+- Out of scope for v0.2 (and where to start when they're in scope)
+
 ## Skill anatomy
 
 ```
@@ -260,18 +272,18 @@ with a one-paragraph proposal before writing the reference.
 ## Out of scope for v0.2 (and where to start when they're in scope)
 
 - **Bi-directional tracker sync for tracker-originated bugs (auto-import).**
-  Today defaults to `"ask"`. To turn on `"create"`, add a contract
+  Defaults to `"ask"` unless the config says otherwise. To turn on `"create"`, add a contract
   section to [issue-trackers.md](issue-trackers.md) covering what local
   metadata to invent (Test ID? gate item?) when the tracker doesn't have
   them.
-- **Embeddings-backed heuristics.** Today heuristics are explainable
+- **Embeddings-backed heuristics.** Heuristics are explainable
   text patterns. To add fuzzy matching: introduce
   `triage.fuzzy: true | "<model>"` and document the model dependency.
-- **A `qa` umbrella CLI.** Today scripts are tiny shell helpers. To
+- **A `qa` umbrella CLI.** Scripts are tiny shell helpers. To
   bundle, treat the umbrella as a separate published package and link
   to it from `SKILL.md`.
 - **CI workflow that lints templates and dry-runs the HTML render.**
-  Today there is no CI. To add: a GitHub Action that runs
+  If the consuming repository has no such check: a GitHub Action that runs
   `bash -n scripts/*.sh`, validates `qa-config.json` against a JSON
   schema (would also need to ship the schema), and renders the
   skeletons against a fixture repo.

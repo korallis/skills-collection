@@ -9,6 +9,17 @@ session lets triage bias contaminate the auto pass and lets auto-pass
 findings flood the BRB agenda. Use the auto pass to discover; use the
 BRB to decide.
 
+## Contents
+
+- When to run a BRB
+- Inputs
+- Workflow
+- Rules
+- Cross-bug observations
+- Anti-patterns
+- Outputs
+- Definition of done
+
 ## When to run a BRB
 
 - Weekly cadence (or pre-sign-off) — clear the backlog of `open` /

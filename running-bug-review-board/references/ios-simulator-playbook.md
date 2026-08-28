@@ -12,6 +12,20 @@ inspection, build+run, log capture) belongs to the iOS community's
 excellent purpose-built skills. This playbook tells the agent which one
 to reach for and why.
 
+## Contents
+
+- When to activate this playbook
+- Pre-flight
+- What this skill provides for iOS app QA
+- Companion-skill ladder for iOS app QA
+- Recommended stacks per scenario
+- Configuration
+- What our skill contributes during an iOS pass
+- Evidence convention
+- Graceful degradation
+- Anti-patterns
+- Credit
+
 ## When to activate this playbook
 
 Add to the discovery step (see [discovering-the-app.md](discovering-the-app.md)).

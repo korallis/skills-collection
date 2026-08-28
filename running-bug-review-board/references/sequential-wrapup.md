@@ -4,6 +4,22 @@ Use when a prior parallel run stalled, or for any pass small enough to
 run end-to-end in one session. **One agent, one browser tab, one
 scenario at a time.** This mode is the most reliable.
 
+## Contents
+
+- When to use
+- Why sequential is preferred for cleanup
+- Pre-flight
+- Build a checklist (Blocks A–D pattern)
+- Session hygiene (required)
+- Tail-tracking
+- When to escalate
+- Block A — pull before re-testing
+- Verdict
+- Sequential agent prompt
+- Anti-patterns
+- Mid-pass discoveries
+- Time budget
+
 ## When to use
 
 - A previous coordinator merge says "Phase N ready? NO" with remaining

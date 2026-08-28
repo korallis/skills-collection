@@ -11,4 +11,4 @@ for argument in "$@"; do
   esac
 done
 
-exec cursor-agent --force --model cursor-grok-4.6-xhigh "$@"
+exec cursor-agent --force --model "${LEE_CURSOR_GROK_MODEL:-cursor-grok-4.6-xhigh}" "$@"

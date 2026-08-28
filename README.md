@@ -89,7 +89,7 @@ re-run:
 
 ```jsonc
 // ~/.agents/roles.overrides.json
-{ "review": "anthropic/claude-fable-5" }
+{ "review": "<a selector present in the scan>" }
 ```
 
 Then `bin/agent-setup`. A pin naming a model the scan did not find, or one that would defeat the

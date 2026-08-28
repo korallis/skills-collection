@@ -14,6 +14,21 @@ anything, and run the [Lift checklist](#lift-checklist) after.
 
 ---
 
+## Contents
+
+- Wait states (indeterminate loaders)
+- Progress with a real percentage
+- Action feedback and confirmation
+- Toggles and switches with identity
+- Cards and gesture-driven browsing
+- Text and hero moments
+- Input chrome
+- Reveals and brand delight
+- Metal shader effects (all iOS 17+)
+- Shared infrastructure
+- Recurring motion vocabulary in this source
+- Lift checklist
+
 ## Wait states (indeterminate loaders)
 
 ### Gradient Arc Circle Loader

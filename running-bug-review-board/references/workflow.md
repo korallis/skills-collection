@@ -4,6 +4,23 @@ The full decision tree for any QA pass. SKILL.md gives the shape; this gives
 the *how*. Read top-to-bottom on first pass; jump to the numbered sections
 on later passes.
 
+## Contents
+
+- 1. Scope the pass
+- 2. Discover the app
+- 3. Generate the test plan if missing
+- 4. Validate the environment
+- 5. Choose mode
+- 6. Execute
+- 7. Look for invalidated assumptions (engineering hat)
+- 8. File bugs
+- 9. Merge and sign off
+- 10. Hand off to next pass
+- 11. Schedule interactive BRB
+- Anti-patterns
+- Decision flowchart
+- When a QA pass reveals work bigger than QA
+
 ## 1. Scope the pass
 
 Ask yourself (or the user, if ambiguous):

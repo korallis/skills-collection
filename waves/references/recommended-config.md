@@ -8,9 +8,22 @@ particular vendor config path.
 Dispatch each worker the way the current harness dispatches workers: a
 bounded worker with a fixed packet and a required return shape. The
 packet includes objective, non-goals, slice, permitted paths, acceptance,
-the chosen `routeId` from the scan, and the required return shape from
+the worker's role (or a `routeId` for a capability-specific slice, when a scan exists), and the required return shape from
 [handoff-format.md](handoff-format.md). Track the plan on the harness
 plan/todo surface.
+
+## Contents
+
+- Parallel workers
+- Per-worker route selection
+- Return contract
+- Tool restrictions
+- Web and docs access
+- Isolated writes
+- Role defaults
+- Verification defaults
+- Skill install
+- Appendix: Codex configuration examples (optional, one harness)
 
 ## Parallel workers
 
@@ -26,8 +39,11 @@ The runner MUST support parallel workers with bounded concurrency.
 
 ## Per-worker route selection
 
-Pick each worker's model/route from `~/.agents/routes.json`, written by
-`bin/agent-routes scan`. Prefer entries with `sourceKind: harness`.
+Model choice per role comes from `~/.agents/routing.json` (`scout`,
+`implement`, `review`, `verify`), written by the `setup-lee-engineering`
+skill. No routing file means every role runs on the current model. Consult
+`~/.agents/routes.json`, when a scan exists, only for a slice needing a
+specific capability; prefer entries with `sourceKind: harness`.
 
 - `family` decides review independence (use a different family from the
   author when independence matters).
@@ -65,7 +81,8 @@ ownership. Do not point two writers at the same files.
 
 ## Role defaults
 
-Map roles to routes from the scan. Do not hardcode vendor model slugs.
+Model choice per role comes from `~/.agents/routing.json`; the current model
+is the no-file fallback. Do not hardcode vendor model slugs.
 
 | Role | Route to pick |
 | --- | --- |

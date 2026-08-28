@@ -14,6 +14,19 @@ facts with sources, citations, generated files, deployments, and metrics. For
 taste or judgment, verify the sub-claims and evidence; do not fake a crisp grade
 for subjective preference.
 
+## Contents
+
+- 1. Verify Before You Spawn
+- 2. Cheap Checks on Every Handoff
+- 3. Push Self-Checks Into Worker Prompts
+- 4. Use Dedicated Verifier Workers
+- 5. Measure and Cross-Check
+- 6. Verify the Deliverable
+- 7. Acceptance and Escalation
+- Harness-Agnostic Verification Surfaces
+- Example: Codex verification surfaces
+- Grounding (Sources for the Techniques Above)
+
 ## 1. Verify Before You Spawn
 
 Run a pre-fan-out gate after discovery/staging and before delegation:
@@ -127,10 +140,11 @@ Make the verifier's job robust:
 - Different family (optional, strongest): a same-family verifier can self-prefer
   even with an isolated context -- models recognize and favor their own output,
   and the more capable the model, the stronger the effect. For the
-  highest-stakes calls, pick a reviewer/verifier route whose `family` differs
-  from the author's. Read `family` from `~/.agents/routes.json` written by
-  `bin/agent-routes scan`, preferring `sourceKind: harness`; never guess model
-  slugs. A small panel of judges from disjoint families (majority vote on
+  highest-stakes calls, use the `review` or `verify` role from
+  `~/.agents/routing.json`, which setup keeps in a different family from
+  `implement`; confirm against the author's actual family from run receipts,
+  and never guess model slugs. With no routing file, same-model verification
+  still runs — label it same-family rather than independent. A small panel of judges from disjoint families (majority vote on
   binary verdicts, average on scores) beat a single frontier judge on human
   agreement while cutting intra-model bias and cost. (Planned as a default in a
   later version pending testing; for now an opt-in escalation.)
@@ -169,8 +183,10 @@ Prefer direct oracles over prose review:
   of the cost); the verifier does not need to be frontier-class when it has an
   oracle to consult.
 - Panel / multi-pass cross-check: for a high-stakes or contested claim, run it
-  across several independent passes (or routes whose `family` differs, from the
-  scan) and synthesize consensus vs lone-result. That extra spawning is worth it
+  across several independent passes, using the `review`/`verify` roles when
+  those roles are assigned to different families; an unassigned role, or no
+  routing file at all, means that pass runs on the current model and counts as
+  same-family, not independent. Synthesize consensus vs lone-result. That extra spawning is worth it
   for claims the deliverable hinges on.
 
 For docs/current behavior, use primary sources first. For current product or API
@@ -201,7 +217,8 @@ Escalation order:
 
 1. Re-task narrower.
 2. Spawn a verifier.
-3. Use a higher-capability reviewer/verifier route from the scan.
+3. Use the `review` or `verify` role from `~/.agents/routing.json` (the
+   current model when no routing file exists).
 4. Ask the user. Mark the limitation explicitly
    only as a last resort, after re-tasking and verifier passes are exhausted.
 

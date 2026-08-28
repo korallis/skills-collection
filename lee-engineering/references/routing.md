@@ -5,6 +5,18 @@ reachable. This file says what to do with it.
 
 Repository instructions and explicit user authority override everything here.
 
+## Contents
+
+- When this applies
+- Reading the scan
+- Prefer the harness
+- Roles
+- The ledger
+- Dispatch
+- Scheduling against capacity
+- Receipts
+- Independent review
+
 ## When this applies
 
 A task is non-trivial when it changes behavior, a public or inter-module contract, architecture,

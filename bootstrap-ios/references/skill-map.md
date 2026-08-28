@@ -2,6 +2,14 @@
 
 This is the curated menu. Pick what the task needs; do not load all of it.
 
+## Contents
+
+- Paul Hudson / Hacking with Swift
+- Antoine van der Lee / SwiftLee
+- Thomas Ricouard / OpenAI plugin references
+- Krzysztof Zablocki / Merowing
+- AppCreator / Paul Solt
+
 ## Paul Hudson / Hacking with Swift
 
 Canonical directory:

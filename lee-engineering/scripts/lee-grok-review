@@ -22,7 +22,7 @@ export GROK_MEMORY=0
 
 exec grok \
   --always-approve \
-  --model grok-4.6 \
+  --model "${LEE_GROK_REVIEW_MODEL:-grok-4.6}" \
   --reasoning-effort low \
   --output-format streaming-messages-json \
   --include-partial-messages \

@@ -8,7 +8,7 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 - **Standards**: does the code conform to this repo's documented coding standards?
 - **Spec**: does the code faithfully implement the originating issue / spec?
 
-Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings. Run them on the `review` role from `~/.agents/routing.json` when that file exists; otherwise the current model — the review still runs, with less independence.
 
 Use the repository's documented source of work and tracker. Prefer GitHub issues and pull requests
 when GitHub is the repository source of truth. Do not require a Matt Pocock setup command or invent a
