@@ -394,6 +394,84 @@ class AgentsFileMirror(unittest.TestCase):
             self.assertTrue(agents.is_file())
 
 
+class TierTokens(unittest.TestCase):
+    def test_mini_does_not_match_gemini(self) -> None:
+        """Substring matching classified every Gemini model as a small model."""
+        self.assertEqual(ROLES.tier("gemini-3.1-pro"), 1)
+        self.assertEqual(ROLES.tier("gemini-3.7-flash"), -1)
+        self.assertEqual(ROLES.tier("minimax-m1"), 0)
+
+    def test_context_markers_do_not_inflate_the_version(self) -> None:
+        """claude-opus-5-1m is version 5, not 5.1, so it cannot outrank the base model."""
+        self.assertEqual(ROLES.version_of("claude-opus-5-1m"), ROLES.version_of("claude-opus-5"))
+        self.assertEqual(ROLES.version_of("llama-3.1-70b"), 3.1)
+        self.assertEqual(ROLES.version_of("gpt-4-32k"), 4.0)
+
+    def test_unstable_matches_whole_tokens(self) -> None:
+        self.assertTrue(ROLES.unstable("gemini-3-pro-preview"))
+        self.assertFalse(ROLES.unstable("some-expert-model-2"))
+
+
+class PinSafety(unittest.TestCase):
+    def scan(self, routes: list[dict], pools: list[dict] | None = None) -> dict:
+        return {"scannedAt": "t", "harness": {"id": "test"}, "routes": routes, "pools": pools or []}
+
+    def route(self, selector: str, family: str, **extra) -> dict:
+        base = {
+            "selector": selector, "modelId": selector.split("/")[-1], "family": family,
+            "sourceKind": "harness", "source": "test", "pool": "test:p",
+            "reasoning": True, "contextWindow": 200000, "cost": {"output": 10},
+        }
+        base.update(extra)
+        return base
+
+    def test_a_pin_cannot_defeat_the_different_family_rule(self) -> None:
+        routes = [self.route("t/a-opus-5", "claude"), self.route("t/b-sol-5", "gpt")]
+        states = {}
+        problem = ROLES._pin_problem(
+            {"id": "review", "distinct_from": "implement", "needs_reasoning": True},
+            routes[0],
+            states,
+            {"implement": {"family": "claude"}},
+        )
+        self.assertIn("same family", problem)
+
+    def test_a_pin_cannot_select_an_exhausted_pool(self) -> None:
+        route = self.route("t/a-opus-5", "claude", pool="test:dead")
+        problem = ROLES._pin_problem(
+            {"id": "plan", "needs_reasoning": True}, route, {"test:dead": "exhausted"}, {}
+        )
+        self.assertIsNotNone(problem)
+
+    def test_a_pin_that_is_not_in_the_scan_is_rejected(self) -> None:
+        problem = ROLES._pin_problem({"id": "plan", "needs_reasoning": True}, None, {}, {})
+        self.assertIn("not present in the scan", problem)
+
+
+class ConfigWriterSafety(unittest.TestCase):
+    def test_an_unreadable_record_aborts_instead_of_emptying_config(self) -> None:
+        """Fail-open here would drop every role the tool does not manage."""
+        original = ROLES._omp_get
+        try:
+            def boom(key: str):
+                raise ROLES.ConfigUnreadable("omp config get failed: boom")
+
+            ROLES._omp_get = boom
+            result = ROLES.apply_omp(
+                {"roles": {"plan": {"selector": "a/b", "thinking": None}}}, dry_run=False
+            )
+        finally:
+            ROLES._omp_get = original
+        self.assertEqual(result["status"], "aborted")
+        self.assertEqual(result["changes"], [])
+
+    def test_unmanaged_keys_survive_the_merge(self) -> None:
+        current = {"custom": "x/y", "plan": "old/model"}
+        merged = {**current, **{"plan": "new/model"}}
+        self.assertEqual(merged["custom"], "x/y")
+        self.assertEqual(merged["plan"], "new/model")
+
+
 class CollectionIntegrity(unittest.TestCase):
     def test_every_skill_directory_declares_a_matching_name(self) -> None:
         for skill in SKILLS.skill_directories(ROOT):

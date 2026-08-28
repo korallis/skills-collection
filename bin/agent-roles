@@ -130,6 +130,9 @@ UNSTABLE = ("preview", "exp", "experimental", "beta", "alpha")
 # 4.5 and 3.5. Release stamps look like versions and are not, so they go first.
 VERSION = re.compile(r"(?<![0-9.])(\d+)(?:[.-](\d+))?(?![0-9])")
 DATE_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}|\d{8}|\d{6}")
+# Context and parameter markers look like a minor version and are not:
+# `claude-opus-5-1m` is version 5, not 5.1, and `llama-3.1-70b` is 3.1, not 70.
+SIZE_MARKER = re.compile(r"[-_]\d+(?:\.\d+)?[mkbt]\b")
 
 
 def version_of(model_id: str) -> float:
@@ -138,7 +141,7 @@ def version_of(model_id: str) -> float:
     Orders newer models above older ones inside a family without naming any of
     them.
     """
-    stripped = DATE_STAMP.sub(" ", model_id)
+    stripped = SIZE_MARKER.sub(" ", DATE_STAMP.sub(" ", model_id.lower()))
     versions = []
     for major, minor in VERSION.findall(stripped):
         value = float(f"{major}.{minor}") if minor else float(major)
@@ -147,19 +150,27 @@ def version_of(model_id: str) -> float:
     return max(versions, default=0.0)
 
 
+def tokens(model_id: str) -> set[str]:
+    """Split an id on every non-alphanumeric boundary and on digit runs.
+
+    Substring matching is not safe here: `mini` is inside `gemini` and
+    `minimax`, which silently classified every Gemini model as a small model.
+    """
+    return {part for part in re.split(r"[^a-z]+", model_id.lower()) if part}
+
+
 def tier(model_id: str) -> int:
     """-1 small, 0 unmarked, 1 large."""
-    lowered = model_id.lower()
-    if any(word in lowered for word in SMALL_TIER):
+    words = tokens(model_id)
+    if words & set(SMALL_TIER):
         return -1
-    if any(word in lowered for word in LARGE_TIER):
+    if words & set(LARGE_TIER):
         return 1
     return 0
 
 
 def unstable(model_id: str) -> bool:
-    lowered = model_id.lower()
-    return any(word in lowered for word in UNSTABLE)
+    return bool(tokens(model_id) & set(UNSTABLE))
 
 
 def rank(route: dict[str, Any], states: dict[str, str], prefer: str) -> tuple:
@@ -230,6 +241,27 @@ def effort_for(role: dict[str, Any], route: dict[str, Any]) -> str | None:
     return levels[-1] if role["prefer"] == "capability" else levels[0]
 
 
+def _pin_problem(
+    role: dict[str, Any],
+    route: dict[str, Any] | None,
+    states: dict[str, str],
+    assignments: dict[str, Any],
+) -> str | None:
+    """A pin is a preference, not a licence to write something unusable."""
+    if route is None:
+        return "not present in the scan"
+    if not eligible(route, role, states):
+        return "not eligible: unreachable pool, no reasoning support, or not pinnable"
+    distinct = role.get("distinct_from")
+    if distinct and assignments.get(distinct):
+        if route["family"] == assignments[distinct]["family"]:
+            return (
+                f"same family as {distinct} ('{route['family']}'), which would "
+                "defeat independent review"
+            )
+    return None
+
+
 def assign(scan: dict[str, Any]) -> dict[str, Any]:
     states = pool_states(scan)
     routes = scan.get("routes", [])
@@ -243,9 +275,11 @@ def assign(scan: dict[str, Any]) -> dict[str, Any]:
         if pin:
             # Never write a selector the scan did not see. A role pointing at a
             # model the user cannot reach breaks every delegation reading it.
-            if pin in reachable:
-                route = reachable[pin]
+            route = reachable.get(pin)
+            rejection = _pin_problem(role, route, states, assignments)
+            if route is not None and rejection is None:
                 assignments[role["id"]] = {
+                    "thinking": effort_for(role, route),
                     "selector": route["selector"],
                     "family": route["family"],
                     "pool": route["pool"],
@@ -255,7 +289,7 @@ def assign(scan: dict[str, Any]) -> dict[str, Any]:
                     "pinned": True,
                 }
                 continue
-            notes.append(f"{role['id']}: pinned '{pin}' is not in the scan; ignoring the pin")
+            notes.append(f"{role['id']}: ignoring pin '{pin}': {rejection}")
 
         candidates = [route for route in routes if eligible(route, role, states)]
         if not candidates:
@@ -361,9 +395,15 @@ def write_neutral(routing: dict[str, Any]) -> list[Path]:
     home.mkdir(parents=True, exist_ok=True)
     json_path = routing_path()
     md_path = home / "routing.md"
-    json_path.write_text(json.dumps(routing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    md_path.write_text(render_markdown(routing), encoding="utf-8")
+    _atomic_write(json_path, json.dumps(routing, indent=2, sort_keys=True) + "\n")
+    _atomic_write(md_path, render_markdown(routing))
     return [json_path, md_path]
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    staging = path.with_name(f".{path.name}.writing")
+    staging.write_text(content, encoding="utf-8")
+    os.replace(staging, path)
 
 
 # --------------------------------------------------------------------------
@@ -402,63 +442,112 @@ def apply_omp(routing: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         }.items()
         if value
     }
+    # Only the agents whose routing this tool actually changes. `scout` and
+    # `sonic` already resolve `@smol`, which modelRoles above sets, so writing
+    # them again would overwrite per-agent tuning for no behavioural gain.
     desired_agents = {
         key: value
         for key, value in {
-            "scout": selector("scout"),
             "reviewer": "@review" if selector("review") else None,
             "security-reviewer": "@review" if selector("review") else None,
-            "sonic": selector("scout"),
         }.items()
         if value
     }
 
-    backup: dict[str, Any] = {}
-    changes = []
-    for key, desired in (
-        ("modelRoles", desired_roles),
-        ("task.agentModelOverrides", desired_agents),
-    ):
-        current = _omp_get(key)
-        backup[key] = current
-        merged = {**current, **desired}
-        if merged == current:
-            continue
-        changes.append(
-            {
-                "key": key,
-                "added": {k: v for k, v in desired.items() if current.get(k) != v},
-                "preserved": sorted(set(current) - set(desired)),
+    # Read everything first. A failed read must abort before any write, or the
+    # merge silently drops every entry this tool does not manage.
+    targets = (("modelRoles", desired_roles), ("task.agentModelOverrides", desired_agents))
+    try:
+        backup = {key: _omp_get(key) for key, _ in targets}
+    except ConfigUnreadable as error:
+        return {"harness": "omp", "status": "aborted", "reason": str(error), "changes": []}
+
+    planned = [
+        {
+            "key": key,
+            "merged": {**backup[key], **desired},
+            "added": {k: v for k, v in desired.items() if backup[key].get(k) != v},
+            "preserved": sorted(set(backup[key]) - set(desired)),
+        }
+        for key, desired in targets
+        if {**backup[key], **desired} != backup[key]
+    ]
+
+    if not planned:
+        return {"harness": "omp", "status": "already-current", "changes": [], "backup": None}
+    if dry_run:
+        return {"harness": "omp", "status": "would-change", "changes": planned, "backup": None}
+
+    # Back up before mutating, not after: a failure between the two writes must
+    # still leave a restore point.
+    saved = _write_backup(backup)
+
+    written = []
+    for change in planned:
+        try:
+            _omp_set(change["key"], change["merged"])
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            return {
+                "harness": "omp",
+                "status": "partial",
+                "reason": (
+                    f"{change['key']} failed: {error}. Restore with the backup below, "
+                    f"then re-run."
+                ),
+                "changes": written,
+                "backup": str(saved),
             }
-        )
-        if not dry_run:
-            _omp_set(key, merged)
+        readback = _omp_get(change["key"])
+        if readback != change["merged"]:
+            return {
+                "harness": "omp",
+                "status": "unverified",
+                "reason": f"{change['key']} did not read back as written; another writer may be active",
+                "changes": written,
+                "backup": str(saved),
+            }
+        written.append(change)
 
-    saved = None
-    if changes and not dry_run:
-        saved = agents_home() / "backups" / f"omp-config-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
-        saved.parent.mkdir(parents=True, exist_ok=True)
-        saved.write_text(json.dumps(backup, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {"harness": "omp", "status": "changed", "changes": written, "backup": str(saved)}
 
-    return {
-        "harness": "omp",
-        "status": "would-change" if dry_run else ("changed" if changes else "already-current"),
-        "changes": changes,
-        "backup": str(saved) if saved else None,
-    }
+
+def _write_backup(backup: dict[str, Any]) -> Path:
+    directory = agents_home() / "backups"
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    path = directory / f"omp-config-{stamp}.json"
+    path.write_text(json.dumps(backup, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+class ConfigUnreadable(RuntimeError):
+    """Reading current config failed, so merging would silently drop entries."""
 
 
 def _omp_get(key: str) -> dict[str, str]:
+    """Read a config record, failing closed.
+
+    An unreadable record must never be treated as an empty one: the merge would
+    then write only the keys this tool manages and drop everything else the
+    user had configured.
+    """
     result = subprocess.run(
         ["omp", "config", "get", key], capture_output=True, text=True, timeout=30, check=False
     )
     if result.returncode != 0:
+        raise ConfigUnreadable(f"omp config get {key} failed: {result.stderr.strip()[:160]}")
+    raw = result.stdout.strip()
+    if not raw:
         return {}
     try:
-        value = json.loads(result.stdout.strip() or "{}")
-    except json.JSONDecodeError:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ConfigUnreadable(f"omp config get {key} returned non-JSON: {error}") from error
+    if value is None:
         return {}
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        raise ConfigUnreadable(f"omp config get {key} is not a record: {type(value).__name__}")
+    return value
 
 
 def _omp_set(key: str, value: dict[str, str]) -> None:

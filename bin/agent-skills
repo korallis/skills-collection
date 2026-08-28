@@ -334,14 +334,46 @@ def mirror_agents_file(explicit: str | None, dry_run: bool) -> list[dict[str, An
             for source, mirror in AGENTS_FILES
         ]
     )
+    if explicit and not pairs[0][0].is_file():
+        return [
+            {
+                "path": str(pairs[0][0]),
+                "action": "refused",
+                "reason": "no such AGENTS.md; nothing was changed",
+            }
+        ]
 
     actions: list[dict[str, Any]] = []
     for source, mirror in pairs:
         if not source.is_file():
             continue
+        # Compare paths, not targets: a mirror that already links to the source
+        # resolves to it, which is success rather than self-reference.
+        if os.path.normpath(str(source)) == os.path.normpath(str(mirror)):
+            actions.append(
+                {
+                    "path": str(mirror),
+                    "action": "refused",
+                    "reason": "source and mirror are the same file; a link would point at itself",
+                }
+            )
+            break
         if mirror.is_symlink():
-            if mirror.resolve() == source.resolve():
+            if link_target(mirror) == normalize(source):
                 actions.append({"path": str(mirror), "action": "already-linked"})
+            elif link_target(mirror).name != "AGENTS.md":
+                # Someone else owns this link. Replacing it would silently
+                # redirect Claude Code away from whatever they pointed it at.
+                actions.append(
+                    {
+                        "path": str(mirror),
+                        "action": "refused",
+                        "reason": (
+                            f"already a symlink to {link_target(mirror)}, which is not an "
+                            "AGENTS.md; remove it by hand if that is stale"
+                        ),
+                    }
+                )
             else:
                 actions.append({"path": str(mirror), "action": "relink", "target": str(source)})
                 if not dry_run:
