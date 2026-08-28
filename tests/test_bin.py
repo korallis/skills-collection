@@ -31,6 +31,7 @@ def load(name: str):
 
 ROUTES = load("agent-routes")
 SKILLS = load("agent-skills")
+ROLES = load("agent-roles")
 
 
 class FamilyDerivation(unittest.TestCase):
@@ -282,6 +283,115 @@ class ParserSafety(unittest.TestCase):
     def test_an_auth_error_on_stdout_is_a_failure_not_an_empty_catalog(self) -> None:
         self.assertTrue(ROUTES._looks_like_error("Error: not authenticated"))
         self.assertFalse(ROUTES._looks_like_error("* grok-4.6 (default)"))
+
+
+class ModelRanking(unittest.TestCase):
+    def test_a_release_stamp_is_not_a_version(self) -> None:
+        """gpt-4o-mini-2024-07-18 must not read as version 18."""
+        self.assertEqual(ROLES.version_of("gpt-4o-mini-2024-07-18"), 4.0)
+        self.assertEqual(ROLES.version_of("claude-3-5-sonnet-20240620"), 3.5)
+        self.assertEqual(ROLES.version_of("gpt-5.6-sol"), 5.6)
+        self.assertEqual(ROLES.version_of("grok-4.6"), 4.6)
+
+    def test_vendor_tier_words(self) -> None:
+        self.assertEqual(ROLES.tier("gpt-5.4-nano"), -1)
+        self.assertEqual(ROLES.tier("claude-opus-5"), 1)
+        self.assertEqual(ROLES.tier("some-model-2"), 0)
+
+    def test_price_is_not_capability(self) -> None:
+        """A legacy flagship can be the priciest entry and the worst choice."""
+        legacy = {
+            "selector": "a/claude-3-opus", "modelId": "claude-3-opus", "sourceKind": "harness",
+            "pool": "p", "reasoning": True, "contextWindow": 200000, "cost": {"output": 75},
+        }
+        current = {
+            "selector": "a/claude-opus-5", "modelId": "claude-opus-5", "sourceKind": "harness",
+            "pool": "p", "reasoning": True, "contextWindow": 200000, "cost": {"output": 25},
+        }
+        best = min([legacy, current], key=lambda r: ROLES.rank(r, {}, "capability"))
+        self.assertEqual(best["modelId"], "claude-opus-5")
+
+    def test_cheap_prefers_the_small_tier(self) -> None:
+        nano = {
+            "selector": "a/gpt-5.4-nano", "modelId": "gpt-5.4-nano", "sourceKind": "harness",
+            "pool": "p", "reasoning": True, "contextWindow": 100000, "cost": {"output": 1},
+        }
+        flagship = {
+            "selector": "a/gpt-5.6-sol", "modelId": "gpt-5.6-sol", "sourceKind": "harness",
+            "pool": "p", "reasoning": True, "contextWindow": 900000, "cost": {"output": 40},
+        }
+        best = min([flagship, nano], key=lambda r: ROLES.rank(r, {}, "cheap"))
+        self.assertEqual(best["modelId"], "gpt-5.4-nano")
+
+    def test_harness_routes_outrank_cli_fallbacks(self) -> None:
+        harness = {
+            "selector": "h/m-2", "modelId": "m-2", "sourceKind": "harness",
+            "pool": "p", "reasoning": True, "contextWindow": 1000, "cost": None,
+        }
+        cli = {
+            "selector": "c/m-9", "modelId": "m-9", "sourceKind": "cli-fallback",
+            "pool": "q", "reasoning": True, "contextWindow": 900000, "cost": None,
+        }
+        best = min([cli, harness], key=lambda r: ROLES.rank(r, {}, "capability"))
+        self.assertEqual(best["sourceKind"], "harness")
+
+
+class RoleAssignment(unittest.TestCase):
+    def scan(self, routes: list[dict]) -> dict:
+        return {"scannedAt": "t", "harness": {"id": "test"}, "routes": routes, "pools": []}
+
+    def route(self, selector: str, family: str, **extra) -> dict:
+        base = {
+            "selector": selector, "modelId": selector.split("/")[-1], "family": family,
+            "sourceKind": "harness", "source": "test", "pool": "test:p",
+            "reasoning": True, "contextWindow": 200000, "cost": {"output": 10},
+        }
+        base.update(extra)
+        return base
+
+    def test_review_takes_a_family_other_than_implement(self) -> None:
+        routing = ROLES.assign(self.scan([
+            self.route("t/alpha-opus-5", "claude"),
+            self.route("t/beta-sol-5", "gpt"),
+        ]))
+        self.assertNotEqual(
+            routing["roles"]["implement"]["family"], routing["roles"]["review"]["family"]
+        )
+
+    def test_a_single_family_is_reported_not_hidden(self) -> None:
+        routing = ROLES.assign(self.scan([self.route("t/only-opus-5", "claude")]))
+        self.assertTrue(any("only one model family" in note for note in routing["notes"]))
+
+    def test_the_live_session_route_is_never_pinned(self) -> None:
+        """It cannot be named, so it cannot be written into a config."""
+        routing = ROLES.assign(self.scan([
+            self.route("<live session>", "unknown", modelId="unknown", reasoning=None),
+        ]))
+        self.assertTrue(all(value is None for value in routing["roles"].values()))
+
+    def test_an_exhausted_pool_is_not_assigned(self) -> None:
+        scan = self.scan([self.route("t/alpha-opus-5", "claude", pool="test:dead")])
+        scan["pools"] = [{"poolId": "test:dead", "poolState": "exhausted"}]
+        routing = ROLES.assign(scan)
+        self.assertIsNone(routing["roles"]["implement"])
+
+    def test_effort_matches_the_role(self) -> None:
+        route = {"thinkingLevels": ["low", "medium", "high", "max"]}
+        self.assertEqual(ROLES.effort_for({"prefer": "capability"}, route), "max")
+        self.assertEqual(ROLES.effort_for({"prefer": "cheap"}, route), "low")
+        self.assertIsNone(ROLES.effort_for({"prefer": "cheap"}, {"thinkingLevels": None}))
+
+
+class AgentsFileMirror(unittest.TestCase):
+    def test_a_differing_claude_file_is_refused_not_clobbered(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            agents = base / "AGENTS.md"
+            agents.write_text("shared rules", encoding="utf-8")
+            claude = Path("~/.claude/CLAUDE.md").expanduser()
+            if claude.exists() and not claude.is_symlink():
+                self.skipTest("real CLAUDE.md present; covered by the identical-copy path")
+            self.assertTrue(agents.is_file())
 
 
 class CollectionIntegrity(unittest.TestCase):

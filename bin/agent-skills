@@ -42,6 +42,15 @@ HARNESS_ROOTS: tuple[tuple[str, str | None], ...] = (
     ("~/.factory/skills", "~/.factory"),
     ("~/.grok/skills", "~/.grok"),
     ("~/.gemini/skills", "~/.gemini"),
+    ("~/.t3/skills", "~/.t3"),
+    ("~/.droid/skills", "~/.droid"),
+)
+
+# AGENTS.md is the cross-agent convention. Claude Code reads CLAUDE.md instead,
+# so CLAUDE.md becomes a symlink to it: one file to edit, both names present.
+AGENTS_FILES: tuple[tuple[str, str], ...] = (
+    ("~/.omp/agent/AGENTS.md", "~/.claude/CLAUDE.md"),
+    ("~/.agents/AGENTS.md", "~/.claude/CLAUDE.md"),
 )
 
 
@@ -310,6 +319,60 @@ def prune(roots: list[Path], dry_run: bool, source_root: Path) -> list[dict[str,
     return actions
 
 
+def mirror_agents_file(explicit: str | None, dry_run: bool) -> list[dict[str, Any]]:
+    """Make CLAUDE.md a symlink to AGENTS.md.
+
+    Claude Code reads CLAUDE.md; everything else reads AGENTS.md. Keeping two
+    real files means editing one and silently diverging from the other, so
+    CLAUDE.md becomes a link that is never edited directly.
+    """
+    pairs = (
+        [(Path(explicit).expanduser(), Path("~/.claude/CLAUDE.md").expanduser())]
+        if explicit
+        else [
+            (Path(source).expanduser(), Path(mirror).expanduser())
+            for source, mirror in AGENTS_FILES
+        ]
+    )
+
+    actions: list[dict[str, Any]] = []
+    for source, mirror in pairs:
+        if not source.is_file():
+            continue
+        if mirror.is_symlink():
+            if mirror.resolve() == source.resolve():
+                actions.append({"path": str(mirror), "action": "already-linked"})
+            else:
+                actions.append({"path": str(mirror), "action": "relink", "target": str(source)})
+                if not dry_run:
+                    mirror.unlink()
+                    mirror.symlink_to(source)
+        elif mirror.exists():
+            if mirror.read_bytes() == source.read_bytes():
+                actions.append({"path": str(mirror), "action": "replace-identical-copy"})
+                if not dry_run:
+                    mirror.unlink()
+                    mirror.symlink_to(source)
+            else:
+                actions.append(
+                    {
+                        "path": str(mirror),
+                        "action": "refused",
+                        "reason": (
+                            f"differs from {source}; merge them by hand, then re-run. "
+                            "Nothing was changed."
+                        ),
+                    }
+                )
+        else:
+            actions.append({"path": str(mirror), "action": "link", "target": str(source)})
+            if not dry_run:
+                mirror.parent.mkdir(parents=True, exist_ok=True)
+                mirror.symlink_to(source)
+        break  # one AGENTS.md wins; the list is a preference order
+    return actions
+
+
 def status(roots: list[Path], sources: list[Path]) -> list[dict[str, Any]]:
     report = []
     for root in roots:
@@ -335,7 +398,14 @@ def status(roots: list[Path], sources: list[Path]) -> list[dict[str, Any]]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "action", choices=("link", "status", "unlink", "prune"), nargs="?", default="status"
+        "action",
+        choices=("link", "status", "unlink", "prune", "agents-file"),
+        nargs="?",
+        default="status",
+    )
+    parser.add_argument(
+        "--agents-file",
+        help="path to an AGENTS.md to mirror as CLAUDE.md (default: the first one found)",
     )
     parser.add_argument("--root", action="append", default=[], help="extra skill root")
     parser.add_argument(
@@ -383,8 +453,11 @@ def main(argv: list[str] | None = None) -> int:
             print("dangling links from renamed skills; run: agent-skills prune")
         return 0
 
-    if arguments.action == "link":
+    if arguments.action == "agents-file":
+        actions = mirror_agents_file(arguments.agents_file, arguments.dry_run)
+    elif arguments.action == "link":
         actions = link(roots, skills, arguments.dry_run, arguments.replace_copies)
+        actions += mirror_agents_file(arguments.agents_file, arguments.dry_run)
     elif arguments.action == "unlink":
         actions = unlink(roots, skills, arguments.dry_run, source_root)
     else:

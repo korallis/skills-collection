@@ -135,6 +135,7 @@ def probe_omp(source: str) -> tuple[list[dict], list[dict], str | None]:
                 "maxOutput": entry.get("maxTokens"),
                 "reasoning": entry.get("reasoning"),
                 "thinkingLevels": entry.get("thinking"),
+                "cost": entry.get("cost"),
                 "discoveredBy": "omp models --json",
             }
         )
@@ -228,6 +229,7 @@ def _text_catalog(
             "maxOutput": None,
             "reasoning": None,
             "thinkingLevels": None,
+            "cost": None,
             "discoveredBy": " ".join(command),
         }
         for model_id in parse(output)
@@ -304,6 +306,62 @@ def probe_grok(source: str) -> tuple[list[dict], list[dict], str | None]:
     return _text_catalog(source, ["grok", "models"], _parse_grok, "xai")
 
 
+def probe_t3(source: str) -> tuple[list[dict], list[dict], str | None]:
+    """T3 publishes its entitled models as a file, so no subprocess is needed.
+
+    `~/.t3/userdata/model-manifest.json` holds `manifest.currentModels`, keyed
+    by backend, each a list of model ids the account may use.
+    """
+    manifest = Path.home() / ".t3" / "userdata" / "model-manifest.json"
+    if not manifest.is_file():
+        return [], [], "no model manifest at ~/.t3/userdata/model-manifest.json"
+    try:
+        current = json.loads(manifest.read_text(encoding="utf-8"))["manifest"]["currentModels"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        return [], [], f"model manifest unreadable: {error}"
+
+    routes = []
+    pools = []
+    for backend, models in current.items():
+        if not isinstance(models, list):
+            continue
+        pools.append(
+            {
+                "poolId": f"{source}:{backend}",
+                "source": source,
+                "provider": backend,
+                "meter": None,
+                "window": None,
+                "usedFraction": None,
+                "remainingFraction": None,
+                "windowDurationMs": None,
+                "resetsAt": None,
+                "state": "unknown",
+            }
+        )
+        routes.extend(
+            {
+                "source": source,
+                "sourceKind": "cli-fallback",
+                "provider": backend,
+                "selector": f"{backend}/{model_id}",
+                "modelId": model_id,
+                "family": family_of(model_id),
+                "pool": f"{source}:{backend}",
+                "contextWindow": None,
+                "maxOutput": None,
+                "reasoning": None,
+                "thinkingLevels": None,
+                "cost": None,
+                "discoveredBy": "~/.t3/userdata/model-manifest.json",
+            }
+            for model_id in models
+        )
+    for pool in pools:
+        pool["poolState"] = pool["state"]
+    return routes, pools, "manifest catalog; quota not machine-readable"
+
+
 def probe_none(source: str) -> tuple[list[dict], list[dict], str | None]:
     """This harness or CLI publishes no model list.
 
@@ -356,6 +414,14 @@ PROBES: tuple[dict[str, Any], ...] = (
         "harnessEnv": ("GEMINI_CLI", "GEMINI_SESSION_ID"),
         "versionArgs": ["--version"],
         "probe": probe_none,
+    },
+    {
+        "id": "t3",
+        "binary": "t3",
+        "harnessEnv": ("T3_SESSION_ID", "T3_ENVIRONMENT_ID"),
+        "versionArgs": ["--version"],
+        "probe": probe_t3,
+        "fileBacked": True,
     },
     {
         "id": "opencode",
@@ -446,6 +512,7 @@ def _live_session_route(
             "maxOutput": None,
             "reasoning": None,
             "thinkingLevels": None,
+            "cost": None,
             "discoveredBy": f"{identifier} session detected via {harness['detectedBy']}",
             "note": (
                 "the model this session already runs on; this harness publishes no "
@@ -465,7 +532,7 @@ def scan() -> dict[str, Any]:
 
     for probe in PROBES:
         is_current = probe["id"] == harness["id"]
-        if not installed(probe["binary"]):
+        if not installed(probe["binary"]) and not probe.get("fileBacked"):
             if is_current:
                 sources.append(
                     {
