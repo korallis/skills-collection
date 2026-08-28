@@ -94,8 +94,9 @@ step "2. Run the installer itself, end to end, everything under temp"
   >"$SANDBOX/setup.log" 2>&1
 setup_rc=$?
 check "agent-setup exits 0" "$setup_rc"
+# Headings carry ANSI bold, so do not anchor to line start.
 check "it ran all three steps" \
-  "$([ "$(grep -c '^\[[123]/3\]' "$SANDBOX/setup.log")" -eq 3 ] && echo 0 || echo 1)"
+  "$([ "$(grep -c '\[[123]/3\]' "$SANDBOX/setup.log")" -eq 3 ] && echo 0 || echo 1)"
 sed -n '/^sources/,/^$/p' "$SANDBOX/setup.log" | sed 's/^/  /'
 
 /usr/bin/python3 - <<'PY2' > "$SANDBOX/scan.txt"
