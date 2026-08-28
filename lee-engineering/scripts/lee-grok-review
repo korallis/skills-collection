@@ -18,11 +18,17 @@ for argument in "$@"; do
   esac
 done
 
+if [ -z "${LEE_GROK_REVIEW_MODEL:-}" ]; then
+  echo "lee-grok-review: set LEE_GROK_REVIEW_MODEL to a selector from your scan" >&2
+  echo "  (run bin/agent-routes scan, or read ~/.agents/routing.md)" >&2
+  exit 64
+fi
+
 export GROK_MEMORY=0
 
 exec grok \
   --always-approve \
-  --model "${LEE_GROK_REVIEW_MODEL:-grok-4.6}" \
+  --model "$LEE_GROK_REVIEW_MODEL" \
   --reasoning-effort low \
   --output-format streaming-messages-json \
   --include-partial-messages \

@@ -37,16 +37,17 @@ When a Grok CLI route is the admitted fallback, launch it through the installed 
 
 - `lee-grok` — direct worker. Injects `--always-approve` and rejects `--permission-mode` and a
   caller-supplied `--always-approve`.
-- `lee-grok-review` — fixed-artifact read-only review. Pins the model (default overridable via
-  `LEE_GROK_REVIEW_MODEL`; argv cannot change it), pins low reasoning, keeps approve mode,
+- `lee-grok-review` — fixed-artifact read-only review. Requires `LEE_GROK_REVIEW_MODEL`, a selector
+  from your scan (argv cannot change it; no baked-in default to go stale), pins low reasoning, keeps
+  approve mode,
   disables memory, planning, subagents, web access, and built-in tools, limits the run to one turn,
   and emits streaming Messages JSON. Every component is first-party documented: `--effort low`
   (alias `--reasoning-effort`), `--no-memory`, `--no-plan`, `--no-subagents`,
   `--disable-web-search`, `--disallowed-tools`, `--max-turns 1`,
   `--output-format streaming-messages-json`, and optionally `--sandbox read-only`.
   https://docs.x.ai/build/cli/reference
-- `lee-cursor-grok` — Cursor-backed Grok worker. Pins the model (default overridable via
-  `LEE_CURSOR_GROK_MODEL`; argv cannot change it) and injects `--force`, rejecting
+- `lee-cursor-grok` — Cursor-backed Grok worker. Requires `LEE_CURSOR_GROK_MODEL`, a selector from
+  your scan (argv cannot change it; no baked-in default to go stale), and injects `--force`, rejecting
   caller-supplied model, mode, force, yolo, and auto-review flags.
 
 The user-level Grok configuration must also contain exactly the following. It is user-scoped: a

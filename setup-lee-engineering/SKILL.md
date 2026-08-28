@@ -1,6 +1,6 @@
 ---
 name: setup-lee-engineering
-description: Set up the agent skills collection for whatever harness you are in. Links the skills into every harness from one copy, scans which models the account can actually reach, assigns them to engineering roles, and writes the harness's own routing config. Use for /setup-lee-engineering, "set up lee-engineering", "which models do I have", "scan my routes", "configure my model routing", or before any multi-model dispatch.
+description: Set up the agent skills collection for whatever harness you are in. Links the skills into every harness from one copy, scans which models the account can actually reach, assigns them to engineering roles, writes the harness's own routing config, and confirms the assignment with the user role by role. Use for /setup-lee-engineering, "set up lee-engineering", "which models do I have", "scan my routes", "configure routing.json", "change which model reviews", or before any multi-model dispatch.
 ---
 
 # Setup
@@ -103,16 +103,26 @@ Two rules hold everywhere:
 - **Any other harness** — no native role config, so the neutral `routing.json` is the contract and
   skills read it directly. That is reported, not treated as a failure.
 
-### Pinning a role yourself
+### Confirm the assignment with the user
 
-The ranking is a heuristic and will sometimes be wrong. Pin a role in
-`~/.agents/roles.overrides.json` and it wins on every re-run:
+After `apply`, show the user the role table and ask whether any role should change — do not assume
+the heuristic got it right. For a role they want changed, list three or four suitable candidates
+from the scan (matching the role's needs: reasoning for `plan`/`implement`/`review`, a different
+family from `implement` for `review`/`verify`, cheap for `scout`) and let them choose. Prefer the
+harness's structured question tool over free text when it has one.
 
-```json
-{ "review": "<a selector present in the scan>" }
+Write the choice with the validated writer, never by hand-editing:
+
+```bash
+bin/agent-roles pin review <selector from the scan>
+bin/agent-roles apply                # push the change into the harness config
+bin/agent-roles pin review --clear   # back to the heuristic
 ```
 
-A pin naming a model the scan did not find is ignored and reported.
+`pin` rejects an unknown role and any selector the scan did not see, so a typo cannot write an
+unreachable model. Pins live in `~/.agents/roles.overrides.json` and win on every re-run; a pin that
+would defeat the different-family rule for `review`/`verify` is ignored and reported at assign
+time.
 
 ## Re-run when
 

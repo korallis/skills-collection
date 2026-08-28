@@ -11,4 +11,10 @@ for argument in "$@"; do
   esac
 done
 
-exec cursor-agent --force --model "${LEE_CURSOR_GROK_MODEL:-cursor-grok-4.6-xhigh}" "$@"
+if [ -z "${LEE_CURSOR_GROK_MODEL:-}" ]; then
+  echo "lee-cursor-grok: set LEE_CURSOR_GROK_MODEL to a selector from your scan" >&2
+  echo "  (run bin/agent-routes scan, or read ~/.agents/routing.md)" >&2
+  exit 64
+fi
+
+exec cursor-agent --force --model "$LEE_CURSOR_GROK_MODEL" "$@"

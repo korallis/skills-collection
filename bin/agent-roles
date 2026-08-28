@@ -693,12 +693,63 @@ def summarise(routing: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def pin(arguments) -> int:
+    """Validated writer for ~/.agents/roles.overrides.json.
+
+    The safe alternative to hand-editing: a pin naming a selector the scan did
+    not see, or an unknown role, is rejected here instead of being silently
+    ignored at the next assign.
+    """
+    role_ids = [role["id"] for role in ROLES]
+    if arguments.role not in role_ids:
+        print(f"agent-roles: unknown role '{arguments.role}'; roles: {', '.join(role_ids)}", file=sys.stderr)
+        return 2
+
+    path = agents_home() / "roles.overrides.json"
+    current = overrides()
+
+    if arguments.clear:
+        current.pop(arguments.role, None)
+    else:
+        if not arguments.selector:
+            print("agent-roles: pin needs a selector, or --clear", file=sys.stderr)
+            return 2
+        scan = load_scan()
+        reachable = {route["selector"] for route in scan.get("routes", [])}
+        if arguments.selector not in reachable:
+            print(
+                f"agent-roles: '{arguments.selector}' is not in the scan; run agent-routes scan,"
+                " then pick a selector it lists",
+                file=sys.stderr,
+            )
+            return 2
+        current[arguments.role] = arguments.selector
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(path, json.dumps(current, indent=2, sort_keys=True) + "\n")
+
+    routing = assign(load_scan())
+    write_neutral(routing)
+    print(summarise(routing))
+    print(f"\npins: {json.dumps(current) if current else 'none'}")
+    print("apply the change to the harness config with: agent-roles apply")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("action", choices=("assign", "show", "apply"), nargs="?", default="assign")
+    parser.add_argument(
+        "action", choices=("assign", "show", "apply", "pin"), nargs="?", default="assign"
+    )
+    parser.add_argument("role", nargs="?", help="pin: which role to pin")
+    parser.add_argument("selector", nargs="?", help="pin: a selector from the scan")
+    parser.add_argument("--clear", action="store_true", help="pin: remove the pin instead")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     arguments = parser.parse_args(argv)
+
+    if arguments.action == "pin":
+        return pin(arguments)
 
     if arguments.action == "show":
         path = routing_path()
