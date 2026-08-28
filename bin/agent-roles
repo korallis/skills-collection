@@ -326,6 +326,13 @@ def _pin_problem(
 def assign(scan: dict[str, Any]) -> dict[str, Any]:
     states = pool_states(scan)
     routes = scan.get("routes", [])
+
+    # The harness takes precedence. When it already reaches two or more families
+    # it can author and review on its own, so CLI fallbacks are not considered
+    # at all: they would add a second data route and an untracked draw on
+    # another meter without adding capability.
+    if scan.get("harnessSufficient"):
+        routes = [route for route in routes if route["sourceKind"] == "harness"]
     reachable = {route["selector"]: route for route in routes}
     pinned = overrides()
     assignments: dict[str, Any] = {}
@@ -405,6 +412,11 @@ def assign(scan: dict[str, Any]) -> dict[str, Any]:
         notes.append(
             "only one model family is reachable; independent review cannot be "
             "satisfied on this machine"
+        )
+
+    if scan.get("harnessSufficient"):
+        notes.append(
+            "harness reaches two or more families, so CLI fallbacks were not considered"
         )
 
     return {
