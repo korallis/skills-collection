@@ -27,12 +27,14 @@ records the sources that could be identified.
 - Repository: https://github.com/RayFernando1337/rayfernando-skills
 - License: Apache License 2.0. Copyright 2026 Ray Fernando. See licenses/APACHE-2.0.txt.
 - Skills in this collection: bootstrap-ios, running-bug-review-board,
-  swiftui-animation-match, waves-codex.
+  swiftui-animation-match, waves.
+- The `waves` skill was renamed from `waves-codex` and generalised so it
+  no longer assumes a specific vendor CLI.
 
 ## Further sources cited by those skills
 
 - Phillip Chaffee, public `deep-research` Cursor skill, credited in
-  waves-codex/references/adaptation-notes.md:
+  waves/references/adaptation-notes.md:
   https://github.com/PhillipChaffee/.cursor
 - Shubham Kumar Singh, SwiftUI-Animations catalog used by swiftui-animation-match:
   https://github.com/Shubham0812/SwiftUI-Animations (Apache-2.0)

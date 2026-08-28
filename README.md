@@ -2,7 +2,7 @@
 
 Working set of agent skills used across local engineering agents. Each skill is a directory with a `SKILL.md` file, plus optional `references/`, `agents/`, and `scripts/` files.
 
-This repository is a public snapshot of the live tree at `~/.agents/skills` (also linked from `~/.claude/skills`). `lee-engineering` is the default router for software work. It loads the other skills only when they apply.
+This repository is the source of truth. It is not a snapshot of an installed tree: you clone it once, and every harness reads that clone through symlinks. `lee-engineering` is the default router for software work, and it loads the other skills only when they apply.
 
 Most skills here come from these sources. Use the linked repositories for upstream copies where they exist:
 
@@ -13,39 +13,59 @@ Most skills here come from these sources. Use the linked repositories for upstre
 
 The catalog below links each copied skill to its folder in those repos. Original skills written for this collection are marked Original. Full notices are in [NOTICE.md](NOTICE.md).
 
-## Use a skill
+## Install
 
-1. Clone this repository.
-2. Copy or symlink the skill directory into your agent's skills folder.
-3. Invoke the skill by name.
-
-Typical install locations:
-
-- `~/.agents/skills/<skill-name>`
-- `~/.claude/skills/<skill-name>`
-
-A skill is available as soon as its folder is present. You do not register it in a separate manifest.
+Clone once, link once. The clone is the only copy on disk.
 
 ```bash
 git clone https://github.com/korallis/skills-collection.git
-cp -R skills-collection/lee-engineering ~/.agents/skills/
+cd skills-collection
+bin/agent-skills link
 ```
 
-To install every skill:
+`link` symlinks every skill into every harness skill root it finds on the machine, creating a root
+only for a harness you actually have:
+
+| Root | Read by |
+| --- | --- |
+| `~/.agents/skills` | the cross-agent convention: Cursor, Codex, Gemini CLI |
+| `~/.claude/skills` | Claude Code, which does not read `~/.agents/skills` |
+| `~/.cursor/skills` | Cursor |
+| `~/.codex/skills` | Codex |
+| `~/.grok/skills`, `~/.gemini/skills`, `~/.factory/skills` | their harnesses |
+
+Because they are symlinks to one directory, editing a skill changes it everywhere at once and no
+root can silently drift. `bin/agent-skills status` reports any root that has become a copy or points
+somewhere else; `--root PATH` adds a root; `--dry-run` previews.
+
+Skills are invoked by name. Nothing needs registering in a manifest.
+
+### Why not a plugin
+
+Cursor and Claude Code can install a repository as a plugin, but both cache it per harness, which
+recreates the duplication this layout exists to remove. Symlinked loose skills are the only form that
+gives every harness one shared copy. Claude Code documents that it follows a skill symlink and loads
+the target once; Codex follows symlinked skill *directories*, which is why this tool never symlinks
+an individual `SKILL.md`.
+
+## Find out what models you have
+
+Skills here never assume which models or CLIs exist. They scan.
 
 ```bash
-git clone https://github.com/korallis/skills-collection.git
-mkdir -p ~/.agents/skills
-for skill in skills-collection/*/; do
-  name=$(basename "$skill")
-  case "$name" in
-    .git|licenses) continue ;;
-  esac
-  cp -R "$skill" ~/.agents/skills/
-done
+bin/agent-routes scan     # writes ~/.agents/routes.json
+bin/agent-routes show     # reprint the last scan
 ```
 
-Skip directories that are not skills. `LICENSE`, `NOTICE.md`, `README.md`, `.gitignore`, and `licenses/` are not skills.
+The scan probes the harness you are currently in first, then any vendor CLI on the machine, and
+records every model the account can actually reach, its family, the provider meter that bills it, and
+current usage where the source exposes it. A vendor CLI is a fallback: when it only duplicates a
+family the harness already reaches, the route is flagged rather than used.
+
+Adding a harness or CLI is one entry in `PROBES` in [`bin/agent-routes`](bin/agent-routes).
+
+See [setup-lee-engineering](setup-lee-engineering/) for the guided version, invocable as
+`/setup-lee-engineering`.
 
 ## Catalog
 
@@ -78,8 +98,9 @@ Skip directories that are not skills. `LICENSE`, `NOTICE.md`, `README.md`, `.git
 | [to-tickets](to-tickets/) | Break a plan into tracer-bullet tickets with blocking edges. | [mattpocock/skills](https://github.com/mattpocock/skills) · [to-tickets](https://github.com/mattpocock/skills/tree/main/skills/engineering/to-tickets) (adapted) |
 | [handoff](handoff/) | Compact the current conversation into a handoff for the next agent. | [mattpocock/skills](https://github.com/mattpocock/skills) · [handoff](https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff) |
 | [arena](arena/) | Isolated competing candidates, judged against shared criteria. | Original |
-| [waves-codex](waves-codex/) | Bounded wave orchestration for Codex: workers, aggregate, verify, extend. | [RayFernando1337/rayfernando-skills](https://github.com/RayFernando1337/rayfernando-skills) · [waves-codex](https://github.com/RayFernando1337/rayfernando-skills/tree/main/plugins/waves-codex/skills/waves-codex) |
-| [research](research/) | Investigate a question against primary sources and write findings into the repo. | [mattpocock/skills](https://github.com/mattpocock/skills) · [research](https://github.com/mattpocock/skills/tree/main/skills/engineering/research) |
+| [waves](waves/) | Bounded wave orchestration: workers, aggregate, verify, extend. Harness-agnostic. | [RayFernando1337/rayfernando-skills](https://github.com/RayFernando1337/rayfernando-skills) · [waves-codex](https://github.com/RayFernando1337/rayfernando-skills/tree/main/plugins/waves-codex/skills/waves-codex) (adapted) |
+| [research](research/) | Investigate a question against primary sources and write findings into the repo. Routes web reading through Firecrawl when the harness has it. | [mattpocock/skills](https://github.com/mattpocock/skills) · [research](https://github.com/mattpocock/skills/tree/main/skills/engineering/research) (adapted) |
+| [setup-lee-engineering](setup-lee-engineering/) | Link the collection into every harness, then scan which models the account can actually reach. | Original |
 
 ## Sources
 
@@ -104,9 +125,9 @@ Docs for several of these skills also live on [aihero.dev](https://www.aihero.de
 
 Apache License 2.0. Copyright 2026 Ray Fernando. License text: [licenses/APACHE-2.0.txt](licenses/APACHE-2.0.txt).
 
-Copied here: `bootstrap-ios`, `running-bug-review-board`, `swiftui-animation-match`, and `waves-codex`.
+Copied here: `bootstrap-ios`, `running-bug-review-board`, `swiftui-animation-match`, and `waves` (renamed from `waves-codex`).
 
-`waves-codex` also credits [Phillip Chaffee's public `deep-research` Cursor skill](https://github.com/PhillipChaffee/.cursor) for run-shape triage and dependency-aware dispatch. `swiftui-animation-match` catalogs [Shubham Kumar Singh's SwiftUI-Animations](https://github.com/Shubham0812/SwiftUI-Animations). `bootstrap-ios` routes to community packs listed in [bootstrap-ios/references/sources.md](bootstrap-ios/references/sources.md), including [Paul Hudson / Hacking with Swift](https://github.com/twostraws/swift-agent-skills), [Antoine van der Lee](https://github.com/AvdLee), [OpenAI plugins](https://github.com/openai/plugins), [Krzysztof Zablocki](https://merowing.info/posts/stop-getting-average-code-from-your-llm/), and [XcodeBuildMCP](https://github.com/getsentry/XcodeBuildMCP).
+`waves` keeps Ray's method and drops its Codex-specific runner instructions so it works in any harness; model choice now comes from `bin/agent-routes scan`. It also credits [Phillip Chaffee's public `deep-research` Cursor skill](https://github.com/PhillipChaffee/.cursor) for run-shape triage and dependency-aware dispatch. `swiftui-animation-match` catalogs [Shubham Kumar Singh's SwiftUI-Animations](https://github.com/Shubham0812/SwiftUI-Animations). `bootstrap-ios` routes to community packs listed in [bootstrap-ios/references/sources.md](bootstrap-ios/references/sources.md).
 
 ### Robert C. Martin — *Clean Code* and *Clean Architecture*
 
@@ -140,7 +161,7 @@ Original to this collection.
 
 Default entry point for planning, design, implementation, refactoring, debugging, review, and documentation. It reads the repository's own rules first, prefers TypeScript for new code when no language is already chosen, and loads only the specialist skills that help the current task. Creating an app, module, package, workspace, or folder tree loads `scaffolding`. Adding a dependency, layer, or import that crosses a boundary loads `clean-architecture`. Writing or reviewing source loads `clean-code`.
 
-For non-trivial work it follows the local multi-model contract in `lee-engineering/references/model-routing.md`: coordinator, supervisor, specialist, worker, writer lease, route admission, receipts, and independent review. Cloud coding agents are out of scope. Skill activation never grants permission to push, open a pull request, deploy, or mutate unrelated external state.
+For non-trivial work it follows [`lee-engineering/references/routing.md`](lee-engineering/references/routing.md): read the scan, prefer the harness over a vendor CLI, keep model family separate from capacity pool, hold a writer lease, return receipts, and require a different-family reviewer for merge-critical work. Cloud coding agents are out of scope. Skill activation never grants permission to push, open a pull request, deploy, or mutate unrelated external state.
 
 ## Architecture and design
 

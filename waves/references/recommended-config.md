@@ -1,10 +1,110 @@
-# Recommended Codex Configuration
+# Recommended harness requirements
 
-Use this as a starting point for the `waves-codex` workflow. Put shared
-defaults in `~/.codex/config.toml` or repo-specific settings in
-`.codex/config.toml` for trusted projects.
+Use this as a starting point for the `waves` workflow. The runner MUST
+satisfy the capabilities below. How each harness names tools, config
+files, or spawn APIs is its own concern; this skill does not require a
+particular vendor config path.
 
-## Read First: Native Delegation on GPT-5.6 (config is optional now)
+Dispatch each worker the way the current harness dispatches workers: a
+bounded worker with a fixed packet and a required return shape. The
+packet includes objective, non-goals, slice, permitted paths, acceptance,
+the chosen `routeId` from the scan, and the required return shape from
+[handoff-format.md](handoff-format.md). Track the plan on the harness
+plan/todo surface.
+
+## Parallel workers
+
+The runner MUST support parallel workers with bounded concurrency.
+
+- Respect the harness worker-concurrency cap. If the cap is unknown,
+  batch 3–8 workers.
+- Recursion is off by default: workers MUST NOT spawn workers.
+- Manager-driven sequential waves (a second or third wave at the same
+  depth, after the previous wave returns) are encouraged.
+- For row-shaped work, use the harness batch/CSV spawn when it exists;
+  otherwise spawn one worker per row.
+
+## Per-worker route selection
+
+Pick each worker's model/route from `~/.agents/routes.json`, written by
+`bin/agent-routes scan`. Prefer entries with `sourceKind: harness`.
+
+- `family` decides review independence (use a different family from the
+  author when independence matters).
+- `pool` decides scheduling.
+- A vendor CLI is a fallback only for a family or capability the harness
+  cannot provide.
+
+## Return contract
+
+Every worker MUST return the structured handoff in
+[handoff-format.md](handoff-format.md). Reject or re-run a worker that
+omits coverage, confidence, or concrete sources when the packet required
+them.
+
+## Tool restrictions
+
+- Explorers, reviewers, and verifiers: read-only. They MUST NOT edit
+  files.
+- Implementation workers: write only inside the owned slice (explicit
+  files or modules). They MUST NOT revert changes they did not make or
+  touch unrelated paths.
+- Research workers: read-only unless the packet explicitly assigns
+  edits.
+
+## Web and docs access
+
+When a slice depends on current APIs, versions, or live docs, the worker
+MUST have web/docs access (harness web search, docs MCP, or equivalent).
+Cite source URLs and call out date-sensitive or uncertain details.
+
+## Isolated writes
+
+Parallel writes MUST use isolated git worktrees or disjoint path
+ownership. Do not point two writers at the same files.
+
+## Role defaults
+
+Map roles to routes from the scan. Do not hardcode vendor model slugs.
+
+| Role | Route to pick |
+| --- | --- |
+| Manager / coordinator | High-capability harness route |
+| Scouting / read-heavy | Cheaper/faster harness route |
+| Research | Capable route with live web/docs access |
+| Implementation | Capable coding route |
+| Reviewer / verifier | Capable route; prefer a different `family` from the author when independence matters |
+
+## Verification defaults
+
+Recommended acceptance bars:
+
+- Pre-fan-out: counts, slice bounds, partition-sum, gaps/duplicates.
+- Every handoff: evidence resolves, scope matches, confidence labels
+  preserved.
+- High-stakes claims: a verifier worker (or batch verifier pass).
+- Code edits: tests or type checks plus a diff review.
+- Generated files: parser/schema/validator where possible.
+- Final response: keep `verified`, `single-sourced`, and `unverified`
+  distinct.
+
+## Skill install
+
+Skill install is harness-specific. This collection is linked by
+`bin/agent-skills link` into each harness skill root. Do not assume a
+single vendor skill directory.
+
+---
+
+## Appendix: Codex configuration examples (optional, one harness)
+
+The rest of this file is **Codex syntax for one harness**, not the skill
+requirement. Keep it only if you are running on Codex. TOML under
+`~/.codex/config.toml` or `.codex/config.toml`, `codex exec`, GPT-5.6
+slugs, `agents.max_threads`, custom agent TOML, `spawn_agents_on_csv`,
+and `approvals_reviewer` are Codex-only.
+
+### Example: Codex native-delegation caution (GPT-5.6)
 
 On GPT-5.6 Sol/Terra (the V2 multi-agent runtime), the primary steering
 surface is **prompt and skill text, not config**: delegation triggers on
@@ -31,7 +131,7 @@ overrides restored in 0.145+ as explicit-only). Practical stance:
   exposed before relying on them -- this surface has changed three times in
   July 2026 alone.
 
-## Default Manager/Worker Setup
+### Example: Codex default manager/worker setup
 
 ```toml
 # Manager default. gpt-5.6 is the alias for gpt-5.6-sol (flagship); route
@@ -100,7 +200,7 @@ Effort field names, ladder, and speed tier:
   priority processing (`/fast`, or `service_tier = "fast"` / `"flex"`), it
   applies; do not force a tier on the user.
 
-## Optional Custom Agents
+### Example: Codex optional custom agents
 
 Codex supports standalone custom agent TOML files under `~/.codex/agents/` for
 personal agents or `.codex/agents/` for project agents. Each file needs `name`,
@@ -108,7 +208,7 @@ personal agents or `.codex/agents/` for project agents. Each file needs `name`,
 `model_reasoning_effort`, `sandbox_mode`, `mcp_servers`, and `skills.config`
 inherit from the parent when omitted.
 
-### `.codex/agents/parallel-explorer.toml`
+#### `.codex/agents/parallel-explorer.toml`
 
 ```toml
 name = "parallel_explorer"
@@ -126,7 +226,7 @@ Return the requested structured handoff with coverage, confidence, and concrete 
 """
 ```
 
-### `.codex/agents/docs-researcher.toml`
+#### `.codex/agents/docs-researcher.toml`
 
 ```toml
 name = "docs_researcher"
@@ -146,7 +246,7 @@ Return the requested structured handoff with confidence labels.
 url = "https://developers.openai.com/mcp"
 ```
 
-### `.codex/agents/parallel-worker.toml`
+#### `.codex/agents/parallel-worker.toml`
 
 ```toml
 name = "parallel_worker"
@@ -162,7 +262,7 @@ Run focused verification for your slice and return the code/edit handoff.
 """
 ```
 
-### `.codex/agents/reviewer.toml`
+#### `.codex/agents/reviewer.toml`
 
 ```toml
 name = "reviewer"
@@ -180,7 +280,7 @@ Return the requested structured handoff.
 """
 ```
 
-### `.codex/agents/verifier.toml`
+#### `.codex/agents/verifier.toml`
 
 ```toml
 name = "verifier"
@@ -201,7 +301,7 @@ Do not edit files.
 """
 ```
 
-## Registering Custom Agents from Config
+### Example: Codex registering custom agents from config
 
 Standalone files in `.codex/agents/` are the simplest convention. If you want a
 config file to declare roles explicitly, Codex's sample config also supports:
@@ -229,18 +329,9 @@ nickname_candidates = ["Verifier", "Crosscheck"]
 
 Paths in `config_file` are relative to the `config.toml` that defines them.
 
-## Verification Defaults
+### Example: Codex verification helpers
 
-Recommended acceptance bars for this workflow:
-
-- Pre-fan-out: counts, slice bounds, partition-sum, gaps/duplicates.
-- Every handoff: evidence resolves, scope matches, confidence labels preserved.
-- High-stakes claims: verifier worker or CSV verifier pass.
-- Code edits: tests or type checks plus a diff review.
-- Generated files: parser/schema/validator where possible.
-- Final response: keep `verified`, `single-sourced`, and `unverified` distinct.
-
-Codex-native helpers:
+Codex-native helpers (not required by the skill):
 
 - `spawn_agents_on_csv` for row-shaped verification when available.
 - `codex exec --output-schema` for scripted claim-check outputs.
@@ -248,7 +339,7 @@ Codex-native helpers:
   treat it as a general verifier.
 - `web_search = "live"` or MCP docs tools when current sources are required.
 
-## `codex exec` Fleet Pattern
+### Example: Codex `codex exec` fleet pattern
 
 For scriptable parallel writes, create one git worktree per attempt/slice and
 run one `codex exec` per worktree:
@@ -269,7 +360,7 @@ codex exec --cd ../repo-api-audit --sandbox workspace-write \
 Use `--json` for event streams and `--output-schema` when a script needs
 machine-readable results.
 
-## Skill Location Guidance
+### Example: Codex skill location guidance
 
 Current official Codex skill authoring locations:
 
@@ -281,4 +372,6 @@ Current official Codex skill authoring locations:
 Ray's local setup has previously used a `~/.codex/skills` to `$HOME/.agents`
 symlink/plugin path, so `~/.codex/skills/<skill-name>/` may work on this
 machine. For a portable Codex-native skill, prefer `$HOME/.agents/skills` or
-repo `.agents/skills`.
+repo `.agents/skills`. The collection itself is still linked by
+`bin/agent-skills link`; do not treat `~/.codex/skills` as the skill
+requirement.

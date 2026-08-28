@@ -1,11 +1,11 @@
 ---
 name: lee-engineering
-description: Global TypeScript-first engineering router for Lee's projects. Use whenever planning, designing, building, implementing, refactoring, debugging, reviewing, or documenting software. Selects the smallest relevant specialist skills, local multi-agent workflows, verification, and GitHub-native delivery while respecting repository-specific guidance.
+description: Global TypeScript-first engineering router. Use whenever planning, designing, building, implementing, refactoring, debugging, reviewing, or documenting software. Selects the smallest relevant specialist skills, routes work across whatever models this account can actually reach, verifies against the real artifact, and delivers through GitHub.
 ---
 
 # Lee Engineering
 
-Use this skill as the default entry point for software work. Read
+Default entry point for software work. Read
 [`references/principles.md`](references/principles.md) for non-trivial planning, architecture,
 implementation, or review.
 
@@ -14,33 +14,34 @@ implementation, or review.
 1. Read the repository's instructions, manifests, relevant source, tests, and current Git state.
 2. Treat repository-local product, language, and verification rules as authoritative.
 3. Prefer TypeScript for new applications, services, packages, scripts, and developer tooling when
-   the repository and user have not selected another language. Do not rewrite a healthy non-TypeScript
-   codebase merely to satisfy this preference.
+   the repository and user have not selected another language. Do not rewrite a healthy
+   non-TypeScript codebase merely to satisfy this preference.
 4. Keep planning and implementation inside the user's authorization. Skill activation never grants
    permission to push, open or merge a PR, deploy, message people, or mutate unrelated external state.
-5. Use local harness agents and locally launched coding CLIs only. Do not route work to cloud coding
-   agents.
-6. Launch each Grok route through its matching installed wrapper: `lee-grok` for direct workers,
-   `lee-grok-review` for fixed-artifact review, and `lee-cursor-grok` for Cursor-backed workers. Before
-   admitting any Grok route, apply and verify the approve-mode invariant defined in
-   `references/model-routing.md`; a repository-local command must not override it.
+5. Do not route work to cloud coding agents.
+
+## Know your routes before you dispatch
+
+Never assume which models or CLIs exist. Scan.
+
+```bash
+bin/agent-routes scan     # or: /setup lee-engineering
+```
+
+The scan writes `~/.agents/routes.json`: every model this account can actually reach, which harness
+or CLI reaches it, its family, its capacity pool, and current usage. Read that file. It is the only
+admissible answer to "what can I run this on".
+
+Re-scan when a dispatch fails with an unknown model, when credentials or accounts change, or when the
+file is older than the current session. `bin/agent-routes show` prints the last scan without
+re-probing.
+
+If no scan is possible, say so and continue single-agent. Do not substitute a remembered model list,
+a vendor documentation table, or the names in a config file.
+
+Full routing contract, including the capacity and review rules: [`references/routing.md`](references/routing.md).
 
 ## Route the work
-
-For every non-trivial software task, read and follow the normative
-[`references/model-routing.md`](references/model-routing.md) contract before dispatch. It defines the
-coordinator, supervisor, specialist-lead, worker, writer-lease, route-admission, lifecycle, receipt, and
-independent-review requirements. Do not replace its definitions with a CLI or vendor's terminology.
-
-Before the first provider-backed dispatch and before each later dispatch wave, read
-[`references/capacity-routing.md`](references/capacity-routing.md). Inventory every installed
-engineering harness, group routes by shared capacity pool, and schedule only from a current usage and
-reset snapshot.
-
-Use repository evaluations and concrete community evidence to form task-fit hypotheses, while using
-authoritative provider/tool documentation for route identity and data controls. The dated evidence
-register is non-normative. When broad multi-model coverage is explicitly requested, inventory all
-installed routes, admit only eligible ones, and give each distinct family a non-duplicative lens.
 
 Load only the skills that materially help the current task:
 
@@ -53,16 +54,17 @@ Load only the skills that materially help the current task:
 - A settled plan that needs independently verifiable GitHub work units: `to-tickets`, while keeping
   the repository's existing tracker and source-of-work rules authoritative.
 - TypeScript or TSX implementation and review: `typescript-best-practices`.
-- Writing, placing, or reviewing code in any language: `clean-code`. Adding a
-  dependency, layer, or module boundary: `clean-architecture`. Creating an app,
-  module, package, workspace, or folder tree: `scaffolding`.
+- Writing, placing, or reviewing code in any language: `clean-code`. Adding a dependency, layer, or
+  module boundary: `clean-architecture`. Creating an app, module, package, workspace, or folder
+  tree: `scaffolding`.
 - New behavior or a defect fix: `tdd`; for an unknown failure, start with `diagnosing-bugs`.
 - Merge conflicts: `resolving-merge-conflicts`.
-- Large work with independent slices: `waves-codex`.
+- Large work with independent slices: `waves`.
 - Competing viable designs or implementations: `arena`.
 - Wide or risky changes: `blast-radius` before declaring completion.
 - Contested, security-sensitive, or merge-critical review: `interrogate`.
 - Ordinary code review: `code-review`.
+- External facts, library behaviour, API semantics, or an error message: `research`.
 - Agent instructions and technical prose: `writing-for-agents` and `technical-writing`.
 - Branch, pull-request, check, or merge work: `github-delivery`.
 
@@ -74,6 +76,6 @@ Do not invoke every skill mechanically. Prefer the smallest combination that imp
 2. Implement the smallest coherent slice that proves the design through a real caller or workflow.
 3. Test at the closest useful layer, then run the repository's required checks.
 4. Inspect the changed artifact and its callers, not just command exit codes.
-5. For firm-visible behavior, verify the real user path when the repository supports it.
+5. For user-visible behavior, verify the real user path when the repository supports it.
 6. Before handoff, state what changed, what was verified, remaining risk, and any action requiring
    separate authorization.
