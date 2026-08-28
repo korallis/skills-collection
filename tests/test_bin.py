@@ -581,7 +581,12 @@ class ModelAgnosticism(unittest.TestCase):
     carries its reason, so the next reviewer can re-judge the exemption.
     """
 
-    SLUG = re.compile(r"\b(?:claude|gpt|grok|gemini|kimi|glm|composer|sonnet|opus|haiku)-[0-9]", re.I)
+    SLUG = re.compile(
+        r"\b(?:claude|gpt|grok|gemini|kimi|glm|composer|sonnet|opus|haiku|fable|mythos"
+        r"|llama|deepseek|qwen|mistral|ministral|codestral|muse|spark|glimmer|minimax)-v?[0-9]"
+        r"|\bo[134][0-9]?-(?:mini|nano|pro|max|preview|high|low)",
+        re.I,
+    )
     ALLOWED = {
         "tests/test_bin.py": "test fixtures asserting parsing and ranking behaviour",
         "lee-engineering/references/model-facts.md": "the dated evidence register; slugs are its subject",
@@ -625,6 +630,10 @@ class ModelAgnosticism(unittest.TestCase):
             path = ROOT / name
             with self.subTest(name=name):
                 self.assertTrue(path.is_file(), f"{name} vanished; prune the allowlist")
+                self.assertTrue(
+                    self.SLUG.search(path.read_text(encoding="utf-8")),
+                    f"{name} no longer contains a model slug; prune its exemption",
+                )
 
 
 class CollectionIntegrity(unittest.TestCase):

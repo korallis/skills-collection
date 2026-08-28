@@ -29,8 +29,7 @@ verify important claims, and synthesize the final deliverable.
 **The shape of every wave — WAVE:** Workers fan out across disjoint slices ->
 Aggregate their handoffs -> Verify the evidence (the moat) -> Extend into
 another wave only when warranted. A loop doesn't know when to stop; a wave
-does, because verification is the stop function. (Invoke deliberately - a
-run spawns more agents than usual.)
+does, because verification is the stop function. Invoke deliberately.
 
 Read these references when using the skill:
 
@@ -308,9 +307,10 @@ use a cheaper/faster harness route; implementation, verification, and
 synthesis use capable routes; independent review uses a different `family`
 from the author. Honor any model the user named; if that model is unavailable,
 say so rather than substituting. Pins are advisory: take the model that
-actually ran from the harness's run metadata or the worker's reported model.
-Output quality is not evidence of identity — a worker whose model cannot be
-read back has `family: unknown` and cannot satisfy an independence gate. A vendor CLI is a fallback only
+actually ran from the harness's own run metadata or receipts. A worker's
+self-report and output quality are not identity evidence — a worker whose
+model the harness cannot report has `family: unknown` and cannot satisfy an
+independence gate. A vendor CLI is a fallback only
 for a family or capability the harness cannot provide. `family` decides
 review independence; `pool` decides scheduling.
 
@@ -472,8 +472,8 @@ row-shaped, competitive, write-heavy, or bigger than one session.
       their dependencies' handoffs were verified; checked every row off at
       collection (completion gate); ran the failure ladder on missing/blocked
       slices.
-- [ ] Each worker prompt is self-contained, names a `routeId` from the scan,
-      and ends with the handoff contract.
+- [ ] Each worker prompt is self-contained, names its role (or a `routeId`
+      when a scan exists), and ends with the handoff contract.
 - [ ] Picked explorer, worker, researcher, reviewer, verifier, or row-shaped
       fan-out deliberately; inlined a missing role on the default worker rather
       than skipping it.

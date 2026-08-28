@@ -12,17 +12,6 @@ real customer would*. Computer Use is the highest-fidelity way to do that on
 a Mac — it uses the real, signed-in app and real rendering — and it is the
 **only** way this skill can reach a native macOS desktop app at all.
 
-## Contents
-
-- Table of contents
-- When to use it (and when not to)
-- Detect availability before relying on it
-- Enabling it
-- The driving loop
-- Using it in a QA pass
-- Safety and hygiene
-- Graceful degradation
-
 ## Table of contents
 
 - [When to use it (and when not to)](#when-to-use-it-and-when-not-to)
@@ -61,11 +50,10 @@ Signals (observe, don't force anything):
   browser driver.
 - **Codex present.** `command -v codex` resolves, or the session is running
   inside the Codex app / desktop on macOS.
-- **Plugin installed.** `codex mcp list` shows a `computer-use` server. (The
-  CLI path is still maturing; today Computer Use is primarily an app/desktop
-  capability — verify in your Codex surface.)
-- **Region.** At release it isn't offered in the EEA, the UK, or Switzerland.
-  If the user is there, plan without it. *(Check current Codex docs — this
+- **Plugin installed.** `codex mcp list` shows a `computer-use` server.
+  (Support differs by surface — verify in the surface you are on.)
+- **Region.** Regional availability varies and changes; plan without the
+  capability until confirmed. *(Check current vendor docs — this
   changes.)*
 
 If any signal is missing, say so plainly and continue with the browser
