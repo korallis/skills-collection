@@ -53,7 +53,7 @@ Each route carries:
 
 ## Read the scan, not your memory
 
-- `routes.json` is the only admissible answer to "what can I run this on". An installed binary, a
+- `routes.json` is the answer to "what can I run this on". An installed binary, a
   vendor documentation table, a model name in a config file, and a remembered environment are all
   inadmissible.
 - **A vendor CLI is a fallback.** When `preferOver` is set, the harness already reaches that family;
@@ -71,11 +71,35 @@ Each route carries:
 - the scan predates the current session;
 - a provider returns a quota, billing, or authentication error.
 
-## When the scan finds nothing
+## When your harness publishes no model list
 
-Report what was probed and stop. Do not fall back to assumption. A harness with no machine-readable
-model list is recorded in `sources` with that reason, which is a fact worth reporting rather than a
-gap to fill with a guess.
+Claude Code, Codex, Gemini CLI and opencode do not publish one. That is a fact about the tool, not
+evidence you have no models: you are demonstrably talking to one right now.
+
+In that case the scan records the source as `status: no-api` and adds a single **live-session**
+route with `selector: <live session>` and `family: unknown`. Read it as: keep working on the model
+you are already on. Do not leave a working session to spawn a vendor CLI merely because the CLI is
+the only thing that produced a catalog.
+
+`family: unknown` means the session's model cannot be named, so it cannot satisfy a review gate that
+requires a *different* family. For that gate, and only that gate, a CLI route is a legitimate
+fallback.
+
+Distinguish the `status` values before concluding anything:
+
+| Status | Meaning |
+| --- | --- |
+| `ok` | routes were listed |
+| `no-api` | the tool publishes no model list; absence of data, not absence of models |
+| `empty` | the tool listed nothing |
+| `failed` | the probe errored; treat as unknown, not as absence |
+| `timeout` | the probe hung; treat as unknown, not as absence |
+| `unavailable` | detected as the current harness, but its binary is not on `PATH` |
+
+## When the scan genuinely finds nothing
+
+With no harness detected and no CLI listing models, report what was probed and stop. Do not fall
+back to assumption. If a harness was detected, you always have at least the live-session route.
 
 Adding support for a harness or CLI is one entry in `PROBES` in `bin/agent-routes`. If a harness is
 missing, add it there rather than working around it in prose.

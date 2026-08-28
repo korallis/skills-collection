@@ -20,7 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -56,7 +56,7 @@ FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"llama", "llama"),
     (r"mistral|codestral|devstral", "mistral"),
     (r"minimax", "minimax"),
-    (r"gpt|codex|^o[134]\b|davinci", "gpt"),
+    (r"gpt|codex|(^|/)o[1345](-|$|\b)|davinci", "gpt"),
 )
 
 
@@ -153,12 +153,6 @@ def _omp_pools(source: str) -> tuple[list[dict], str | None]:
     except json.JSONDecodeError as error:
         return [], f"usage was not JSON: {error}"
 
-    generated_ms = report.get("generatedAt")
-    observed = (
-        datetime.fromtimestamp(generated_ms / 1000, timezone.utc)
-        if isinstance(generated_ms, (int, float))
-        else datetime.now(timezone.utc)
-    )
     unusable = set(report.get("accountsWithoutUsage") or []) | set(
         report.get("disabledCredentials") or []
     )
@@ -167,7 +161,6 @@ def _omp_pools(source: str) -> tuple[list[dict], str | None]:
     for provider, windows in (report.get("capacity") or {}).items():
         for window in windows:
             used = window.get("usedAccounts")
-            duration_ms = window.get("durationMs")
             pools.append(
                 {
                     "poolId": f"{source}:{provider}",
@@ -177,15 +170,26 @@ def _omp_pools(source: str) -> tuple[list[dict], str | None]:
                     "window": window.get("window"),
                     "usedFraction": used,
                     "remainingFraction": window.get("remainingAccounts"),
-                    "resetsAt": (
-                        (observed + timedelta(milliseconds=duration_ms)).isoformat()
-                        if isinstance(duration_ms, (int, float))
-                        else None
-                    ),
+                    # The report gives a window LENGTH, not when this window
+                    # started, so a reset time cannot honestly be derived.
+                    "windowDurationMs": window.get("durationMs"),
+                    "resetsAt": None,
                     "state": "blocked" if provider in unusable else _pool_state(used),
                 }
             )
+
+    # One poolId can carry several windows. A route drawing on it is limited by
+    # the worst of them, so every row reports that rollup alongside its own
+    # window state. Otherwise a 7d-available row hides a 5h-exhausted sibling.
+    for pool in pools:
+        siblings = [other for other in pools if other["poolId"] == pool["poolId"]]
+        pool["poolState"] = max(
+            (sibling["state"] for sibling in siblings), key=lambda state: POOL_SEVERITY[state]
+        )
     return pools, None
+
+
+POOL_SEVERITY = {"available": 0, "unknown": 1, "constrained": 2, "exhausted": 3, "blocked": 4}
 
 
 def _pool_state(used_fraction: Any) -> str:
@@ -208,6 +212,8 @@ def _text_catalog(
     code, output = run(command)
     if code != 0:
         return [], [], f"{' '.join(command)} failed: {output.strip()[:200]}"
+    if _looks_like_error(output):
+        return [], [], f"{' '.join(command)} returned an error on stdout"
 
     routes = [
         {
@@ -244,22 +250,50 @@ def _text_catalog(
     return routes, (pool if routes else []), "text catalog; quota not machine-readable"
 
 
+# A parsed token must look like a model id, not like prose. Inventing a route
+# named "Error" or "Models" is far worse than returning none: the agent will
+# dispatch to it.
+MODEL_ID = re.compile(r"^[A-Za-z0-9][\w.\-]*(?:/[A-Za-z0-9][\w.\-]*)?$")
+NOT_MODELS = {
+    "auto", "default", "error", "models", "model", "available", "usage",
+    "authentication", "unauthorized", "forbidden", "warning", "info", "none",
+}
+ERROR_MARKERS = (
+    "not authenticated", "authentication failed", "unauthorized", "please log in",
+    "login required", "no api key", "rate limit", "error:",
+)
+
+
+def _looks_like_error(output: str) -> bool:
+    lowered = output.lower()
+    return any(marker in lowered for marker in ERROR_MARKERS)
+
+
+def _accept(token: str) -> bool:
+    """Require a model-shaped token that carries a digit.
+
+    Every current vendor model id is versioned, so the digit requirement drops
+    prose like `Authentication` while keeping `grok-4.6` and `claude-opus-5`.
+    """
+    if token.lower() in NOT_MODELS or not MODEL_ID.match(token):
+        return False
+    return any(character.isdigit() for character in token)
+
+
 def _parse_cursor(output: str) -> list[str]:
-    models = []
-    for line in output.splitlines():
-        match = re.match(r"^\s*([A-Za-z0-9][\w.\-]*)\s+-\s+\S", line)
-        if match and match.group(1) != "auto":
-            models.append(match.group(1))
-    return models
+    return [
+        match.group(1)
+        for line in output.splitlines()
+        if (match := re.match(r"^\s*(\S+)\s+-\s+\S", line)) and _accept(match.group(1))
+    ]
 
 
 def _parse_grok(output: str) -> list[str]:
-    models = []
-    for line in output.splitlines():
-        match = re.match(r"^\s*[*\-]\s+([A-Za-z0-9][\w.\-]*)", line)
-        if match:
-            models.append(match.group(1))
-    return models
+    return [
+        match.group(1)
+        for line in output.splitlines()
+        if (match := re.match(r"^\s*[*\-]\s+(\S+)", line)) and _accept(match.group(1))
+    ]
 
 
 def probe_cursor(source: str) -> tuple[list[dict], list[dict], str | None]:
@@ -271,7 +305,13 @@ def probe_grok(source: str) -> tuple[list[dict], list[dict], str | None]:
 
 
 def probe_none(source: str) -> tuple[list[dict], list[dict], str | None]:
-    return [], [], "installed, but exposes no machine-readable model list"
+    """This harness or CLI publishes no model list.
+
+    That is a fact about the tool, not evidence the account has no models. When
+    this is the CURRENT harness, scan() adds a live-session route so the session
+    can still name the model it is already talking to.
+    """
+    return [], [], "publishes no machine-readable model list"
 
 
 PROBES: tuple[dict[str, Any], ...] = (
@@ -285,14 +325,14 @@ PROBES: tuple[dict[str, Any], ...] = (
     {
         "id": "claude-code",
         "binary": "claude",
-        "harnessEnv": ("CLAUDECODE", "CLAUDE_CODE_SESSION"),
+        "harnessEnv": ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID"),
         "versionArgs": ["--version"],
         "probe": probe_none,
     },
     {
         "id": "cursor",
         "binary": "cursor-agent",
-        "harnessEnv": ("CURSOR_AGENT", "CURSOR_SESSION_ID"),
+        "harnessEnv": ("CURSOR_AGENT", "CURSOR_TRACE_ID"),
         "versionArgs": ["--version"],
         "probe": probe_cursor,
     },
@@ -306,7 +346,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     {
         "id": "codex",
         "binary": "codex",
-        "harnessEnv": ("CODEX_SANDBOX", "CODEX_SESSION_ID"),
+        "harnessEnv": ("CODEX_SANDBOX", "CODEX_THREAD_ID"),
         "versionArgs": ["--version"],
         "probe": probe_none,
     },
@@ -320,7 +360,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     {
         "id": "opencode",
         "binary": "opencode",
-        "harnessEnv": ("OPENCODE_SESSION_ID",),
+        "harnessEnv": ("OPENCODE_CLIENT", "OPENCODE_SESSION_ID"),
         "versionArgs": ["--version"],
         "probe": probe_none,
     },
@@ -362,11 +402,66 @@ def version_of(probe: dict[str, Any]) -> str | None:
 # --------------------------------------------------------------------------
 
 
+def _source_status(found: list[dict], note: str | None) -> str:
+    """Distinguish "no models here" from "this failed". An agent must not read
+    a failure as an absence."""
+    if found:
+        return "ok"
+    if not note:
+        return "empty"
+    if "publishes no machine-readable model list" in note:
+        return "no-api"
+    if "timed out" in note:
+        return "timeout"
+    return "failed"
+
+
+def _live_session_route(
+    harness: dict[str, Any], routes: list[dict], versions: dict[str, str | None]
+) -> list[dict]:
+    """The model you are already talking to is a route.
+
+    Claude Code, Codex, Gemini CLI and opencode publish no model list, so
+    without this the scan reports zero harness routes while a model is
+    demonstrably working, and every vendor CLI then looks like the only way to
+    reach its family. The session's own model is unnamed, so it is recorded
+    `family: unknown`: usable for work, never sufficient for a review gate that
+    needs a different family.
+    """
+    identifier = harness["id"]
+    if identifier == "unknown":
+        return []
+    if any(route["sourceKind"] == "harness" for route in routes):
+        return []
+    return [
+        {
+            "source": identifier,
+            "sourceKind": "harness",
+            "provider": identifier,
+            "selector": "<live session>",
+            "modelId": "unknown",
+            "family": "unknown",
+            "pool": f"{identifier}:live-session",
+            "contextWindow": None,
+            "maxOutput": None,
+            "reasoning": None,
+            "thinkingLevels": None,
+            "discoveredBy": f"{identifier} session detected via {harness['detectedBy']}",
+            "note": (
+                "the model this session already runs on; this harness publishes no "
+                "model list, so its identity is unknown. Keep working here rather "
+                "than leaving for a CLI."
+            ),
+        }
+    ]
+
+
 def scan() -> dict[str, Any]:
     harness = detect_harness()
     sources: list[dict] = []
     routes: list[dict] = []
     pools: list[dict] = []
+    versions: dict[str, str | None] = {}
 
     for probe in PROBES:
         is_current = probe["id"] == harness["id"]
@@ -377,6 +472,7 @@ def scan() -> dict[str, Any]:
                         "id": probe["id"],
                         "kind": "harness",
                         "status": "unavailable",
+                        "routes": 0,
                         "note": "current harness, but its binary is not on PATH",
                     }
                 )
@@ -389,12 +485,13 @@ def scan() -> dict[str, Any]:
         for pool in found_pools:
             pool["kind"] = kind
 
+        versions[probe["id"]] = version_of(probe)
         sources.append(
             {
                 "id": probe["id"],
                 "kind": kind,
-                "status": "ok" if found else "no-routes",
-                "version": version_of(probe),
+                "status": _source_status(found, note),
+                "version": versions[probe["id"]],
                 "routes": len(found),
                 "note": note,
             }
@@ -402,8 +499,11 @@ def scan() -> dict[str, Any]:
         routes.extend(found)
         pools.extend(found_pools)
 
+    routes.extend(_live_session_route(harness, routes, versions))
     _mark_fallbacks(routes)
-    routes.sort(key=lambda route: (route["sourceKind"] != "harness", route["source"], route["selector"]))
+    routes.sort(
+        key=lambda route: (route["sourceKind"] != "harness", route["source"], route["selector"])
+    )
 
     for index, route in enumerate(routes, start=1):
         route["routeId"] = f"r{index:03d}"
