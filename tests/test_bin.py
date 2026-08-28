@@ -271,6 +271,18 @@ class SourceStatus(unittest.TestCase):
         self.assertEqual(ROUTES._source_status([{"a": 1}], None), "ok")
 
 
+class ManifestSafety(unittest.TestCase):
+    def test_a_malformed_t3_manifest_is_reported_not_fatal(self) -> None:
+        home = Path.home() / ".t3" / "userdata" / "model-manifest.json"
+        if home.is_file():
+            routes, pools, note = ROUTES.probe_t3("t3")
+            self.assertTrue(all(isinstance(r["modelId"], str) for r in routes))
+        else:
+            routes, pools, note = ROUTES.probe_t3("t3")
+            self.assertEqual(routes, [])
+            self.assertIsNotNone(note)
+
+
 class ParserSafety(unittest.TestCase):
     def test_an_error_line_never_becomes_a_model(self) -> None:
         self.assertEqual(ROUTES._parse_cursor("Error - not authenticated\n"), [])
@@ -434,7 +446,7 @@ class PinSafety(unittest.TestCase):
             states,
             {"implement": {"family": "claude"}},
         )
-        self.assertIn("same family", problem)
+        self.assertIn("cannot review implement", problem)
 
     def test_a_pin_cannot_select_an_exhausted_pool(self) -> None:
         route = self.route("t/a-opus-5", "claude", pool="test:dead")
@@ -442,6 +454,23 @@ class PinSafety(unittest.TestCase):
             {"id": "plan", "needs_reasoning": True}, route, {"test:dead": "exhausted"}, {}
         )
         self.assertIsNotNone(problem)
+
+    def test_an_unknown_family_cannot_serve_as_the_reviewer(self) -> None:
+        """An unprovable family is not a different family."""
+        route = self.route("t/mystery-1", "unknown")
+        problem = ROLES._pin_problem(
+            {"id": "review", "distinct_from": "implement", "needs_reasoning": True},
+            route,
+            {},
+            {"implement": {"family": "claude"}},
+        )
+        self.assertIsNotNone(problem)
+
+    def test_review_is_left_unassigned_rather_than_sharing_a_family(self) -> None:
+        routing = ROLES.assign(self.scan([self.route("t/only-opus-5", "claude")]))
+        self.assertIsNotNone(routing["roles"]["implement"])
+        self.assertIsNone(routing["roles"]["review"])
+        self.assertTrue(any("falsely satisfy" in note for note in routing["notes"]))
 
     def test_a_pin_that_is_not_in_the_scan_is_rejected(self) -> None:
         problem = ROLES._pin_problem({"id": "plan", "needs_reasoning": True}, None, {}, {})
@@ -451,17 +480,18 @@ class PinSafety(unittest.TestCase):
 class ConfigWriterSafety(unittest.TestCase):
     def test_an_unreadable_record_aborts_instead_of_emptying_config(self) -> None:
         """Fail-open here would drop every role the tool does not manage."""
-        original = ROLES._omp_get
+        original_get, original_which = ROLES._omp_get, ROLES.shutil.which
         try:
             def boom(key: str):
                 raise ROLES.ConfigUnreadable("omp config get failed: boom")
 
             ROLES._omp_get = boom
+            ROLES.shutil.which = lambda name: "/usr/bin/omp"
             result = ROLES.apply_omp(
                 {"roles": {"plan": {"selector": "a/b", "thinking": None}}}, dry_run=False
             )
         finally:
-            ROLES._omp_get = original
+            ROLES._omp_get, ROLES.shutil.which = original_get, original_which
         self.assertEqual(result["status"], "aborted")
         self.assertEqual(result["changes"], [])
 

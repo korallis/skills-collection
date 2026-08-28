@@ -254,10 +254,11 @@ def _pin_problem(
         return "not eligible: unreachable pool, no reasoning support, or not pinnable"
     distinct = role.get("distinct_from")
     if distinct and assignments.get(distinct):
-        if route["family"] == assignments[distinct]["family"]:
+        if route["family"] in (assignments[distinct]["family"], "unknown"):
             return (
-                f"same family as {distinct} ('{route['family']}'), which would "
-                "defeat independent review"
+                f"family '{route['family']}' cannot review {distinct} "
+                f"('{assignments[distinct]['family']}'); an unprovable or matching "
+                "family does not make a review independent"
             )
     return None
 
@@ -305,14 +306,21 @@ def assign(scan: dict[str, Any]) -> dict[str, Any]:
         distinct = role.get("distinct_from")
         if distinct and assignments.get(distinct):
             other = assignments[distinct]["family"]
-            different = [route for route in candidates if route["family"] != other]
-            if different:
-                candidates = different
-            else:
+            # An unprovable family is not a different family, and a same-family
+            # reviewer is worse than none: it looks like it satisfies the gate.
+            candidates = [
+                route
+                for route in candidates
+                if route["family"] not in (other, "unknown")
+            ]
+            if not candidates:
+                assignments[role["id"]] = None
                 notes.append(
-                    f"{role['id']}: no route in a family other than '{other}'; "
-                    "an independent-review gate cannot be satisfied locally"
+                    f"{role['id']}: no route in a family other than '{other}'; left "
+                    "unassigned, because a same-family reviewer would falsely satisfy "
+                    "the independent-review gate"
                 )
+                continue
 
         if not candidates:
             assignments[role["id"]] = None
@@ -538,7 +546,11 @@ def _omp_get(key: str) -> dict[str, str]:
         raise ConfigUnreadable(f"omp config get {key} failed: {result.stderr.strip()[:160]}")
     raw = result.stdout.strip()
     if not raw:
-        return {}
+        # Empty output means either "unset" or a silent failure. Only the first
+        # is safe to merge against, so confirm the key is genuinely absent.
+        if _omp_key_absent(key):
+            return {}
+        raise ConfigUnreadable(f"omp config get {key} returned nothing but the key exists")
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as error:
@@ -548,6 +560,15 @@ def _omp_get(key: str) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ConfigUnreadable(f"omp config get {key} is not a record: {type(value).__name__}")
     return value
+
+
+def _omp_key_absent(key: str) -> bool:
+    listing = subprocess.run(
+        ["omp", "config", "list"], capture_output=True, text=True, timeout=30, check=False
+    )
+    if listing.returncode != 0:
+        return False
+    return not any(line.strip().startswith(f"{key} =") for line in listing.stdout.splitlines())
 
 
 def _omp_set(key: str, value: dict[str, str]) -> None:

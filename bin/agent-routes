@@ -317,8 +317,10 @@ def probe_t3(source: str) -> tuple[list[dict], list[dict], str | None]:
         return [], [], "no model manifest at ~/.t3/userdata/model-manifest.json"
     try:
         current = json.loads(manifest.read_text(encoding="utf-8"))["manifest"]["currentModels"]
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
+    except (json.JSONDecodeError, KeyError, TypeError, OSError) as error:
         return [], [], f"model manifest unreadable: {error}"
+    if not isinstance(current, dict):
+        return [], [], f"model manifest currentModels is {type(current).__name__}, not a map"
 
     routes = []
     pools = []
@@ -356,6 +358,7 @@ def probe_t3(source: str) -> tuple[list[dict], list[dict], str | None]:
                 "discoveredBy": "~/.t3/userdata/model-manifest.json",
             }
             for model_id in models
+            if isinstance(model_id, str) and model_id
         )
     for pool in pools:
         pool["poolState"] = pool["state"]
