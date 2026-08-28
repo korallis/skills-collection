@@ -8,7 +8,7 @@ particular vendor config path.
 Dispatch each worker the way the current harness dispatches workers: a
 bounded worker with a fixed packet and a required return shape. The
 packet includes objective, non-goals, slice, permitted paths, acceptance,
-the chosen `routeId` from the scan, and the required return shape from
+the worker's role (or a `routeId` when a scan exists), and the required return shape from
 [handoff-format.md](handoff-format.md). Track the plan on the harness
 plan/todo surface.
 
@@ -39,8 +39,11 @@ The runner MUST support parallel workers with bounded concurrency.
 
 ## Per-worker route selection
 
-Pick each worker's model/route from `~/.agents/routes.json`, written by
-`bin/agent-routes scan`. Prefer entries with `sourceKind: harness`.
+Model choice per role comes from `~/.agents/routing.json` (`scout`,
+`implement`, `review`, `verify`), written by the `setup-lee-engineering`
+skill. No routing file means every role runs on the current model. Consult
+`~/.agents/routes.json`, when a scan exists, only for a slice needing a
+specific capability; prefer entries with `sourceKind: harness`.
 
 - `family` decides review independence (use a different family from the
   author when independence matters).

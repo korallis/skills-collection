@@ -75,7 +75,7 @@ run-shape triage and dependency-aware dispatch.
   `deep-research` Cursor skill (https://github.com/PhillipChaffee/.cursor).
 
 The worker packet is also portable: objective, non-goals, slice, permitted
-paths, acceptance, a chosen `routeId` from the scan, and the required return
+paths, acceptance, the worker's role (or a `routeId` when a scan exists), and the required return
 shape in `references/handoff-format.md`. Dispatch that packet the way the
 current harness dispatches workers.
 
@@ -87,8 +87,9 @@ bounded worker per slice with a fixed packet, wait for the required handoff
 shape, then consolidate. Do not treat any vendor tool name as the skill's
 requirement.
 
-Roles replace model slugs. Pick a route from `~/.agents/routes.json` written
-by `bin/agent-routes scan`, preferring `sourceKind: harness`. A vendor CLI is
+Roles replace model slugs. Model choice per role comes from
+`~/.agents/routing.json`, with the current model as the no-file fallback;
+`~/.agents/routes.json` covers capability-specific slices. A vendor CLI is
 a fallback only for a family or capability the harness cannot provide.
 `family` decides review independence; `pool` decides scheduling.
 
@@ -114,7 +115,7 @@ a fallback only for a family or capability the harness cannot provide.
 | "Verify before you trust" | The manager runs pre-fan-out gates, cheap handoff checks, separate verifier waves, and final deliverable validation. |
 | Recursive subplanner (workers spawning workers) | Off by default. Manager-driven sequential waves at depth 1 are the expected shape. |
 | Entropy-first decomposition | Portable as-is. Track the living plan on the harness plan / todo surface. |
-| "Route scouting / read waves to a fast Cursor model via the `model` field" | Route scouting / read-heavy work to a cheaper / faster harness route from `~/.agents/routes.json` (`sourceKind: harness` preferred). Research needs a capable route with web / docs access. Implementation needs a capable coding route. The manager / coordinator uses a high-capability harness route. |
+| "Route scouting / read waves to a fast Cursor model via the `model` field" | Route scouting / read-heavy work to the `scout` role from `~/.agents/routing.json` (current model when no routing file exists). Research needs a capable route with web / docs access. Implementation needs a capable coding route. The manager / coordinator uses a high-capability harness route. |
 
 ### What varies by harness (not a reason to fork the methodology)
 

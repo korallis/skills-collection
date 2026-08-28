@@ -128,7 +128,7 @@ into understanding + plan + subtasks.
 2. Reduce it cheaply. Dig locally (read the repo, package manifest, existing
    scaffolding). For anything the repo cannot answer, spawn a small scouting wave
    (one `explorer` per candidate engine/framework) on a cheaper/faster harness
-   route from `~/.agents/routes.json` written by `bin/agent-routes scan`
+   role from `~/.agents/routing.json` (current model when no routing file exists)
    (prefer `sourceKind: harness`), and verify. State assumptions for
    specification gaps ("web canvas, vanilla TS, one screen + score") instead of
    blocking -- ask only the one question whose answer would change the whole
@@ -276,7 +276,7 @@ The end-to-end SWE shape -- three waves with different jobs:
    disjoint path sets (or one worktree per competing design). Each prompt
    carries the plan excerpt for its subtask, its exact paths, the "you are not
    alone" warning, and the code/edit handoff format. Pick a capable coding
-   route from `~/.agents/routes.json` written by `bin/agent-routes scan`
+   role from `~/.agents/routing.json` (current model when no routing file exists)
    (prefer `sourceKind: harness`).
 3. Wave C -- verify. Read-only workers run the oracles: tests, type checks,
    lint, a reviewer pass over the combined diff, regression checks on sibling
@@ -321,8 +321,8 @@ A wave is not one move - pick the shape from how much you know about the problem
   goal is vague or high-entropy ("build a Flappy Bird game", "make it faster"),
   the first wave's job is to reduce uncertainty, not build. Dig locally, then fan
   a small scouting wave at the unknowns (stack, constraints, current APIs, repo
-  shape) on a cheaper/faster harness route from `~/.agents/routes.json` written
-  by `bin/agent-routes scan` (prefer `sourceKind: harness`), verify, and only
+  shape) on the `scout` role from `~/.agents/routing.json` (current model when
+  no routing file exists), verify, and only
   then decompose the low-entropy version into the execution wave. See
   "Entropy-First Decomposition."
 - Exploratory wave (you don't know the shape yet): when the space is unmapped
