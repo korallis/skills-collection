@@ -61,6 +61,29 @@ jobs:
           find "$root" -maxdepth 1 -mindepth 1 ! -type l -print -quit | grep -q . \
             && { echo "non-symlink entry in skill root" >&2; exit 1; } || true
 
+      - name: A root overlapping the collection is refused
+        run: |
+          if python3 bin/agent-skills link --root .; then
+            echo "linking into the collection was not refused" >&2
+            exit 1
+          fi
+
+      - name: A detected harness with no model list still yields a route
+        env:
+          AGENT_ROUTES_FILE: ${{ runner.temp }}/live.json
+          CLAUDECODE: "1"
+        run: |
+          python3 bin/agent-routes scan >/dev/null
+          python3 - <<'PY'
+          import json, os
+          report = json.load(open(os.environ["AGENT_ROUTES_FILE"]))
+          assert report["harness"]["id"] == "claude-code", report["harness"]
+          harness_routes = [r for r in report["routes"] if r["sourceKind"] == "harness"]
+          assert len(harness_routes) == 1, harness_routes
+          assert harness_routes[0]["family"] == "unknown", harness_routes[0]
+          print("live-session route present")
+          PY
+
       - name: Every skill declares a name matching its directory
         run: |
           python3 - <<'PY'

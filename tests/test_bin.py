@@ -114,36 +114,106 @@ class MissingBinaries(unittest.TestCase):
         self.assertIn("not installed", output)
 
 
+def make_skill(path: Path, body: str = "---\nname: demo-skill\n---\n") -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "SKILL.md").write_text(body, encoding="utf-8")
+    return path
+
+
 class Linking(unittest.TestCase):
-    def test_link_replaces_a_copy_with_a_symlink_to_the_one_source(self) -> None:
+    def test_user_authored_directory_is_never_deleted(self) -> None:
+        """A name collision must not be treated as a stale copy of the collection."""
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            source = base / "collection" / "demo-skill"
-            source.mkdir(parents=True)
-            (source / "SKILL.md").write_text("---\nname: demo-skill\n---\n", encoding="utf-8")
+            source = make_skill(base / "collection" / "demo-skill")
+            mine = make_skill(base / "root" / "demo-skill", "---\nname: demo-skill\n---\nmy work\n")
+            (mine / "notes.md").write_text("hours of my work", encoding="utf-8")
 
-            root = base / "root"
-            stale = root / "demo-skill"
-            stale.mkdir(parents=True)
-            (stale / "SKILL.md").write_text("stale copy", encoding="utf-8")
+            actions = SKILLS.link([base / "root"], [source], dry_run=False, replace=False)
 
-            self.assertEqual(SKILLS.classify(stale, source), "copy")
-            SKILLS.link([root], [source], dry_run=False)
-            self.assertTrue(stale.is_symlink())
-            self.assertEqual(stale.resolve(), source.resolve())
-            self.assertEqual(SKILLS.classify(stale, source), "linked")
+            self.assertEqual([item["action"] for item in actions], ["refused"])
+            self.assertFalse((base / "root" / "demo-skill").is_symlink())
+            self.assertEqual(
+                (mine / "notes.md").read_text(encoding="utf-8"), "hours of my work"
+            )
+
+    def test_replace_copies_moves_aside_rather_than_deleting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = make_skill(base / "collection" / "demo-skill")
+            mine = make_skill(base / "root" / "demo-skill", "different")
+            (mine / "notes.md").write_text("recoverable", encoding="utf-8")
+
+            SKILLS.link([base / "root"], [source], dry_run=False, replace=True)
+
+            self.assertTrue((base / "root" / "demo-skill").is_symlink())
+            kept = list((base / "root").glob("demo-skill.replaced-*"))
+            self.assertEqual(len(kept), 1)
+            self.assertEqual(
+                (kept[0] / "notes.md").read_text(encoding="utf-8"), "recoverable"
+            )
+
+    def test_an_identical_copy_is_replaced_without_a_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = make_skill(base / "collection" / "demo-skill")
+            make_skill(base / "root" / "demo-skill")
+
+            actions = SKILLS.link([base / "root"], [source], dry_run=False, replace=False)
+
+            self.assertEqual([item["action"] for item in actions], ["replace-identical-copy"])
+            self.assertTrue((base / "root" / "demo-skill").is_symlink())
+
+    def test_a_root_inside_the_collection_is_refused(self) -> None:
+        """`--root .` from the clone would otherwise delete the source itself."""
+        with tempfile.TemporaryDirectory() as directory:
+            source_root = Path(directory) / "collection"
+            make_skill(source_root / "demo-skill")
+            for root in (source_root, source_root / "nested", source_root.parent):
+                with self.subTest(root=root):
+                    with self.assertRaises(SKILLS.UnsafeRoot):
+                        SKILLS.check_root(root, source_root.resolve())
 
     def test_dry_run_changes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            source = base / "collection" / "demo-skill"
-            source.mkdir(parents=True)
-            (source / "SKILL.md").write_text("x", encoding="utf-8")
+            source = make_skill(base / "collection" / "demo-skill")
             root = base / "root"
 
-            actions = SKILLS.link([root], [source], dry_run=True)
+            actions = SKILLS.link([root], [source], dry_run=True, replace=False)
             self.assertEqual([item["action"] for item in actions], ["link"])
             self.assertFalse((root / "demo-skill").exists())
+
+    def test_prune_removes_our_dangling_links_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source_root = base / "collection"
+            make_skill(source_root / "demo-skill")
+            root = base / "root"
+            root.mkdir()
+            (root / "renamed-away").symlink_to(source_root / "gone", target_is_directory=True)
+            (root / "someone-elses").symlink_to(base / "elsewhere", target_is_directory=True)
+
+            actions = SKILLS.prune([root], dry_run=False, source_root=source_root.resolve())
+
+            self.assertEqual([item["path"] for item in actions], [str(root / "renamed-away")])
+            self.assertFalse((root / "renamed-away").is_symlink())
+            self.assertTrue((root / "someone-elses").is_symlink())
+
+    def test_unlink_leaves_foreign_symlinks_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source_root = base / "collection"
+            source = make_skill(source_root / "demo-skill")
+            other = make_skill(base / "other" / "demo-skill")
+            root = base / "root"
+            root.mkdir()
+            (root / "demo-skill").symlink_to(other, target_is_directory=True)
+
+            actions = SKILLS.unlink([root], [source], dry_run=False, source_root=source_root.resolve())
+
+            self.assertEqual([item["action"] for item in actions], ["kept"])
+            self.assertTrue((root / "demo-skill").is_symlink())
 
     def test_a_link_to_somewhere_else_is_reported_as_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -170,6 +240,48 @@ class Linking(unittest.TestCase):
 
             names = [path.name for path in SKILLS.skill_directories(base)]
             self.assertEqual(names, ["real-skill"])
+
+
+class LiveSession(unittest.TestCase):
+    def test_a_detected_harness_with_no_catalog_still_yields_a_route(self) -> None:
+        """Claude Code and Codex publish no model list, but a model is answering."""
+        harness = {"id": "claude-code", "version": None, "detectedBy": "CLAUDECODE"}
+        routes = ROUTES._live_session_route(harness, [], {})
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0]["sourceKind"], "harness")
+        self.assertEqual(routes[0]["family"], "unknown")
+
+    def test_no_live_route_is_added_when_the_harness_listed_models(self) -> None:
+        harness = {"id": "omp", "version": None, "detectedBy": "OMPCODE"}
+        existing = [{"sourceKind": "harness", "family": "claude"}]
+        self.assertEqual(ROUTES._live_session_route(harness, existing, {}), [])
+
+    def test_no_live_route_without_a_detected_harness(self) -> None:
+        harness = {"id": "unknown", "version": None, "detectedBy": "none"}
+        self.assertEqual(ROUTES._live_session_route(harness, [], {}), [])
+
+
+class SourceStatus(unittest.TestCase):
+    def test_failure_is_never_reported_as_absence(self) -> None:
+        self.assertEqual(ROUTES._source_status([], "publishes no machine-readable model list"), "no-api")
+        self.assertEqual(ROUTES._source_status([], "timed out after 25s"), "timeout")
+        self.assertEqual(ROUTES._source_status([], "grok models failed: boom"), "failed")
+        self.assertEqual(ROUTES._source_status([], None), "empty")
+        self.assertEqual(ROUTES._source_status([{"a": 1}], None), "ok")
+
+
+class ParserSafety(unittest.TestCase):
+    def test_an_error_line_never_becomes_a_model(self) -> None:
+        self.assertEqual(ROUTES._parse_cursor("Error - not authenticated\n"), [])
+        self.assertEqual(ROUTES._parse_cursor("Models - available\n"), [])
+        self.assertEqual(ROUTES._parse_grok("  * Authentication failed\n"), [])
+
+    def test_a_provider_prefixed_id_survives_intact(self) -> None:
+        self.assertEqual(ROUTES._parse_grok("  * xai/grok-4.6\n"), ["xai/grok-4.6"])
+
+    def test_an_auth_error_on_stdout_is_a_failure_not_an_empty_catalog(self) -> None:
+        self.assertTrue(ROUTES._looks_like_error("Error: not authenticated"))
+        self.assertFalse(ROUTES._looks_like_error("* grok-4.6 (default)"))
 
 
 class CollectionIntegrity(unittest.TestCase):

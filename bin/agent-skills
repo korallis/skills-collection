@@ -7,27 +7,33 @@ immediately and no root can silently drift.
 
     agent-skills link      symlink every skill into every harness root found
     agent-skills status    show what each root points at, and flag drift
-    agent-skills unlink    remove links this tool created
+    agent-skills unlink    remove links that point into this collection
+    agent-skills prune     remove broken links left by a renamed skill
 
-Add `--root PATH` to target an extra skill root, `--dry-run` to preview.
+`--root PATH` adds a root, `--dry-run` previews, `--json` emits machine output.
+
+This tool never deletes a directory. A real directory sitting where a link
+belongs is moved aside to `<name>.replaced-<timestamp>` and reported, because
+it may be your own work rather than a stale copy of this collection.
 """
 
 from __future__ import annotations
 
 import argparse
+import filecmp
 import json
 import os
-import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 # Not skills: repository furniture and shared tooling.
-NON_SKILL_ENTRIES = {"bin", "commands", "licenses", ".git", ".github"}
+NON_SKILL_ENTRIES = {"bin", "licenses", ".git", ".github", "tests"}
 
-# Harness skill roots, in the order they were added. `~/.agents/skills` is the
-# cross-agent convention and is always used; the rest are created only when the
-# harness that owns them already exists on this machine.
+# Harness skill roots. `~/.agents/skills` is the cross-agent convention and is
+# always targeted; the rest are created only when the harness that owns them is
+# already present, so nothing is created for a harness the user does not have.
 HARNESS_ROOTS: tuple[tuple[str, str | None], ...] = (
     ("~/.agents/skills", None),
     ("~/.claude/skills", "~/.claude"),
@@ -38,10 +44,9 @@ HARNESS_ROOTS: tuple[tuple[str, str | None], ...] = (
     ("~/.gemini/skills", "~/.gemini"),
 )
 
-# Slash commands are deliberately not shipped. Cursor, Claude Code, Codex and
-# Gemini CLI all invoke a skill as `/<skill-name>`, and Cursor and Claude Code
-# have merged their command primitive into skills. A skill is therefore the only
-# portable form, so `setup-lee-engineering` is a skill rather than a command file.
+
+class UnsafeRoot(RuntimeError):
+    """A target root would damage the collection it is supposed to serve."""
 
 
 def collection_root() -> Path:
@@ -59,59 +64,207 @@ def skill_directories(root: Path) -> list[Path]:
     )
 
 
-def target_roots(
-    candidates: tuple[tuple[str, str | None], ...], extra: list[str]
-) -> list[Path]:
-    """A root is a target when its owning harness exists, or it already does.
+def check_root(root: Path, source_root: Path) -> Path:
+    """Reject any root that overlaps the collection.
 
-    This is why nothing is created for a harness the user does not have.
+    Without this, `--root .` from inside the clone, or a clone placed directly
+    at `~/.agents/skills`, makes destination and source the same path and the
+    tool eats its own source of truth.
     """
-    roots = []
-    for candidate, owner in candidates:
-        path = Path(candidate).expanduser()
-        owner_path = Path(owner).expanduser() if owner else None
-        if owner_path is None or owner_path.is_dir() or path.is_dir():
-            roots.append(path)
+    resolved = root.expanduser().resolve()
+    if resolved == source_root or source_root in resolved.parents or resolved in source_root.parents:
+        raise UnsafeRoot(
+            f"{root} overlaps the collection at {source_root}; refusing to link into it"
+        )
+    return resolved
+
+
+def target_roots(extra: list[str], source_root: Path) -> list[Path]:
+    candidates = [Path(candidate).expanduser() for candidate, _ in HARNESS_ROOTS]
+    owners = [Path(owner).expanduser() if owner else None for _, owner in HARNESS_ROOTS]
+
+    roots = [
+        candidate
+        for candidate, owner in zip(candidates, owners)
+        if owner is None or owner.is_dir() or candidate.is_dir()
+    ]
     roots.extend(Path(item).expanduser() for item in extra)
+
     seen: set[Path] = set()
-    return [root for root in roots if not (root in seen or seen.add(root))]
+    checked = []
+    for root in roots:
+        resolved = check_root(root, source_root)
+        if resolved not in seen:
+            seen.add(resolved)
+            checked.append(root)
+    return checked
 
 
 def classify(link: Path, expected: Path) -> str:
-    if not link.exists() and not link.is_symlink():
-        return "missing"
     if link.is_symlink():
-        return "linked" if link.resolve() == expected.resolve() else "linked-elsewhere"
-    return "copy"
+        try:
+            target = link.resolve(strict=True)
+        except OSError:
+            return "broken-link"
+        return "linked" if target == expected.resolve() else "linked-elsewhere"
+    if not link.exists():
+        return "missing"
+    return "directory" if link.is_dir() else "file"
 
 
-def link(roots: list[Path], sources: list[Path], dry_run: bool) -> list[dict[str, Any]]:
-    actions = []
+def identical(left: Path, right: Path) -> bool:
+    """True when two trees have the same names and the same bytes throughout."""
+    comparison = filecmp.dircmp(left, right)
+    if comparison.left_only or comparison.right_only or comparison.funny_files:
+        return False
+    _, mismatch, errors = filecmp.cmpfiles(
+        left, right, comparison.common_files, shallow=False
+    )
+    if mismatch or errors:
+        return False
+    return all(
+        identical(left / name, right / name) for name in comparison.common_dirs
+    )
+
+
+def link(
+    roots: list[Path], sources: list[Path], dry_run: bool, replace: bool
+) -> list[dict[str, Any]]:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    actions: list[dict[str, Any]] = []
+
     for root in roots:
         for source in sources:
             destination = root / source.name
             state = classify(destination, source)
+
             if state == "linked":
                 actions.append({"path": str(destination), "action": "already-linked"})
                 continue
 
-            action = "replace-copy" if state == "copy" else (
-                "relink" if state == "linked-elsewhere" else "link"
-            )
-            actions.append({"path": str(destination), "action": action, "target": str(source)})
+            if state in ("directory", "file"):
+                action = _plan_replacement(destination, source, state, replace)
+                if action["action"] == "refused":
+                    actions.append(action)
+                    continue
+            else:
+                action = {
+                    "path": str(destination),
+                    "action": "relink" if state == "linked-elsewhere" else (
+                        "repair-broken" if state == "broken-link" else "link"
+                    ),
+                    "target": str(source),
+                }
+
+            actions.append(action)
             if dry_run:
                 continue
-
-            root.mkdir(parents=True, exist_ok=True)
-            if destination.is_symlink() or destination.is_file():
-                destination.unlink()
-            elif destination.is_dir():
-                shutil.rmtree(destination)
-            destination.symlink_to(source, target_is_directory=source.is_dir())
+            _apply(destination, source, state, stamp, action)
     return actions
 
 
-def unlink(roots: list[Path], sources: list[Path], dry_run: bool) -> list[dict[str, Any]]:
+def _plan_replacement(
+    destination: Path, source: Path, state: str, replace: bool
+) -> dict[str, Any]:
+    """A real file or directory is never assumed to be ours."""
+    if state == "directory" and identical(destination, source):
+        return {
+            "path": str(destination),
+            "action": "replace-identical-copy",
+            "target": str(source),
+        }
+    if replace:
+        return {
+            "path": str(destination),
+            "action": "move-aside",
+            "target": str(source),
+        }
+    return {
+        "path": str(destination),
+        "action": "refused",
+        "reason": (
+            "not a link and not an identical copy of the collection; it may be your own "
+            "work. Inspect it, then re-run with --replace-copies to move it aside."
+        ),
+    }
+
+
+def _apply(
+    destination: Path, source: Path, state: str, stamp: str, action: dict[str, Any]
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if state in ("directory", "file"):
+        if action["action"] == "move-aside":
+            kept = destination.with_name(f"{destination.name}.replaced-{stamp}")
+            destination.rename(kept)
+            action["movedTo"] = str(kept)
+        else:
+            # An identical copy carries no information the source does not.
+            kept = destination.with_name(f"{destination.name}.replaced-{stamp}")
+            destination.rename(kept)
+            _remove_tree(kept)
+    elif destination.is_symlink():
+        destination.unlink()
+
+    # Create under a temporary name, then move into place, so a failure never
+    # leaves the root without an entry.
+    staging = destination.with_name(f".{destination.name}.linking-{stamp}")
+    if staging.is_symlink() or staging.exists():
+        staging.unlink()
+    staging.symlink_to(source, target_is_directory=True)
+    os.replace(staging, destination)
+
+
+def _remove_tree(path: Path) -> None:
+    for child in sorted(path.rglob("*"), reverse=True):
+        child.unlink() if not child.is_dir() or child.is_symlink() else child.rmdir()
+    path.rmdir()
+
+
+def normalize(path: Path) -> Path:
+    """Canonical form that also works for a path that does not exist.
+
+    `Path.resolve()` on a broken link leaves platform symlinks in place, so on
+    macOS a real `/private/var/...` anchor never matches a `/var/...` target.
+    Resolve the longest existing prefix, then re-append the rest.
+    """
+    path = Path(os.path.normpath(str(path)))
+    existing = path
+    trailing: list[str] = []
+    while not existing.exists() and existing != existing.parent:
+        trailing.append(existing.name)
+        existing = existing.parent
+    return existing.resolve().joinpath(*reversed(trailing))
+
+
+def link_target(path: Path) -> Path:
+    target = Path(os.readlink(path))
+    return normalize(target if target.is_absolute() else (path.parent / target))
+
+
+def owned_link(path: Path, source_root: Path, boundary: list[Path] | None = None) -> bool:
+    """True when this symlink points inside the system we manage.
+
+    That is the collection itself, or another managed skill root. The old
+    copy-based installer chained roots together (`~/.claude/skills/x` ->
+    `~/.agents/skills/x`), so a leftover of ours can point at a sibling root
+    rather than at the collection. A link to anywhere else is not ours and is
+    never removed.
+    """
+    if not path.is_symlink():
+        return False
+    resolved = link_target(path)
+    for anchor in [source_root, *(boundary or [])]:
+        anchor = normalize(anchor)
+        if resolved == anchor or anchor in resolved.parents:
+            return True
+    return False
+
+
+def unlink(
+    roots: list[Path], sources: list[Path], dry_run: bool, source_root: Path
+) -> list[dict[str, Any]]:
     names = {source.name for source in sources}
     actions = []
     for root in roots:
@@ -119,9 +272,41 @@ def unlink(roots: list[Path], sources: list[Path], dry_run: bool) -> list[dict[s
             destination = root / name
             if not destination.is_symlink():
                 continue
+            if not owned_link(destination, source_root, roots):
+                actions.append(
+                    {
+                        "path": str(destination),
+                        "action": "kept",
+                        "reason": "symlink does not point into this collection",
+                    }
+                )
+                continue
             actions.append({"path": str(destination), "action": "unlink"})
             if not dry_run:
                 destination.unlink()
+    return actions
+
+
+def prune(roots: list[Path], dry_run: bool, source_root: Path) -> list[dict[str, Any]]:
+    """Remove links into this collection whose target no longer exists.
+
+    Renaming a skill leaves one of these in every root. Links pointing anywhere
+    else are left alone: they are not ours to remove.
+    """
+    actions = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for entry in sorted(root.iterdir()):
+            if not entry.is_symlink() or entry.exists():
+                continue
+            if not owned_link(entry, source_root, roots):
+                continue
+            actions.append(
+                {"path": str(entry), "action": "prune", "target": os.readlink(entry)}
+            )
+            if not dry_run:
+                entry.unlink()
     return actions
 
 
@@ -132,66 +317,102 @@ def status(roots: list[Path], sources: list[Path]) -> list[dict[str, Any]]:
         for source in sources:
             state = classify(root / source.name, source)
             states[state] = states.get(state, 0) + 1
-        report.append({"root": str(root), "states": states})
+        stale = (
+            sum(
+                1
+                for entry in root.iterdir()
+                if entry.is_symlink()
+                and not entry.exists()
+                and entry.name not in {source.name for source in sources}
+            )
+            if root.is_dir()
+            else 0
+        )
+        report.append({"root": str(root), "states": states, "danglingExtras": stale})
     return report
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("action", choices=("link", "status", "unlink"), nargs="?", default="status")
+    parser.add_argument(
+        "action", choices=("link", "status", "unlink", "prune"), nargs="?", default="status"
+    )
     parser.add_argument("--root", action="append", default=[], help="extra skill root")
+    parser.add_argument(
+        "--replace-copies",
+        action="store_true",
+        help="move a non-identical directory aside instead of refusing it",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     arguments = parser.parse_args(argv)
 
-    root = collection_root()
-    skills = skill_directories(root)
+    source_root = collection_root()
+    skills = skill_directories(source_root)
     if not skills:
-        print(f"agent-skills: no skills found under {root}", file=sys.stderr)
+        print(f"agent-skills: no skills found under {source_root}", file=sys.stderr)
         return 1
 
-    groups = [("skills", target_roots(HARNESS_ROOTS, arguments.root), skills)]
+    try:
+        roots = target_roots(arguments.root, source_root)
+    except UnsafeRoot as error:
+        print(f"agent-skills: {error}", file=sys.stderr)
+        return 2
 
     if arguments.action == "status":
-        report = {
-            label: status(roots, sources) for label, roots, sources in groups
-        }
+        report = status(roots, skills)
         if arguments.json:
-            print(json.dumps({"source": str(root), "groups": report}, indent=2))
+            print(json.dumps({"source": str(source_root), "roots": report}, indent=2))
             return 0
-        print(f"source   {root}\n")
-        drifted = False
-        for label, _, sources in groups:
-            print(f"{label} ({len(sources)})")
-            for entry in report[label]:
-                summary = ", ".join(
-                    f"{count} {state}" for state, count in sorted(entry["states"].items())
-                )
-                print(f"  {entry['root']:<34} {summary}")
-                drifted = drifted or any(
-                    state in ("copy", "linked-elsewhere") for state in entry["states"]
-                )
-            print()
-        if drifted:
-            print("copies and foreign links drift from the source; run: agent-skills link")
+        print(f"source   {source_root}  ({len(skills)} skills)\n")
+        for entry in report:
+            summary = ", ".join(
+                f"{count} {state}" for state, count in sorted(entry["states"].items())
+            )
+            extras = (
+                f"  (+{entry['danglingExtras']} dangling)" if entry["danglingExtras"] else ""
+            )
+            print(f"  {entry['root']:<34} {summary}{extras}")
+        if any(
+            state in ("directory", "file", "linked-elsewhere", "broken-link")
+            for entry in report
+            for state in entry["states"]
+        ):
+            print("\ndrift found; run: agent-skills link")
+        if any(entry["danglingExtras"] for entry in report):
+            print("dangling links from renamed skills; run: agent-skills prune")
         return 0
 
-    operation = link if arguments.action == "link" else unlink
-    actions = [
-        item
-        for _, roots, sources in groups
-        for item in operation(roots, sources, arguments.dry_run)
-    ]
+    if arguments.action == "link":
+        actions = link(roots, skills, arguments.dry_run, arguments.replace_copies)
+    elif arguments.action == "unlink":
+        actions = unlink(roots, skills, arguments.dry_run, source_root)
+    else:
+        actions = prune(roots, arguments.dry_run, source_root)
+
     if arguments.json:
-        print(json.dumps({"source": str(root), "dryRun": arguments.dry_run, "actions": actions}, indent=2))
-        return 0
+        print(
+            json.dumps(
+                {"source": str(source_root), "dryRun": arguments.dry_run, "actions": actions},
+                indent=2,
+            )
+        )
+        return 1 if any(item["action"] == "refused" for item in actions) else 0
 
-    changed = [item for item in actions if item["action"] != "already-linked"]
+    changed = [item for item in actions if item["action"] not in ("already-linked", "kept")]
     for item in changed:
-        print(f"  {item['action']:<14} {item['path']}")
+        detail = item.get("movedTo") or item.get("reason") or ""
+        print(f"  {item['action']:<24} {item['path']}")
+        if detail:
+            print(f"  {'':<24} {detail}")
     verb = "would change" if arguments.dry_run else "changed"
     print(f"\n{verb} {len(changed)} of {len(actions)} entries")
-    print(f"source of truth: {root}")
+    print(f"source of truth: {source_root}")
+
+    refused = [item for item in actions if item["action"] == "refused"]
+    if refused:
+        print(f"\n{len(refused)} refused; nothing was deleted", file=sys.stderr)
+        return 1
     return 0
 
 

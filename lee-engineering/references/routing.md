@@ -40,8 +40,15 @@ accounts. So:
 a family the harness already reaches: taking it adds a data route and a second draw on the same meter
 and buys nothing.
 
-Reach for a CLI fallback only for a family or capability the harness genuinely cannot provide, such
-as a family absent from the harness catalog, or a second concurrent writer process. A vendor
+Several harnesses publish no model list at all. There the scan records `status: no-api` and emits one
+**live-session** route: the model you are already talking to, with `family: unknown`. Stay on it. A
+CLI listing many models does not make those models better than the one already answering you, and an
+empty harness catalog is missing data, not a missing model. Read `status` before concluding anything:
+`failed` and `timeout` mean unknown, never absence.
+
+Reach for a CLI fallback only for a family or capability the harness genuinely cannot provide: a
+family absent from the scan, a **different** family for a review gate the live-session route cannot
+satisfy because its own family is unknown, or a second concurrent writer process. A vendor
 preference is not a capability gap. See [`fallback-clis.md`](fallback-clis.md) before launching one.
 
 Never route work to a cloud coding agent: a hosted task, provider-managed workspace or VM, remote PR
