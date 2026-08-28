@@ -372,6 +372,77 @@ def probe_t3(source: str) -> tuple[list[dict], list[dict], str | None]:
     return routes, pools, "manifest catalog; quota not machine-readable"
 
 
+# ------------------------------------------------------------------
+# Authentication
+#
+# An installed CLI is not a usable route. A logged-out CLI can still print a
+# model table, or an error that parses as one, so every CLI source must prove it
+# is authenticated before its routes count. The harness needs no separate check:
+# its catalog is credential-scoped, so listing models IS the proof.
+# ------------------------------------------------------------------
+
+
+def auth_by_command(command: list[str]) -> Callable[[], tuple[bool, str]]:
+    def check() -> tuple[bool, str]:
+        code, output = run(command, timeout=20)
+        if code == 0:
+            return True, output.strip().splitlines()[0][:80] if output.strip() else "authenticated"
+        return False, f"{' '.join(command)} says not signed in"
+
+    return check
+
+
+def auth_claude() -> tuple[bool, str]:
+    """`claude auth status` returns JSON and exits 0 either way, so read it."""
+    code, output = run(["claude", "auth", "status"], timeout=20)
+    if code != 0:
+        return False, "claude auth status failed"
+    try:
+        report = json.loads(output)
+    except json.JSONDecodeError:
+        return False, "claude auth status was not JSON"
+    if report.get("loggedIn") is True:
+        return True, f"signed in via {report.get('authMethod', 'unknown method')}"
+    return False, "claude auth status reports not signed in"
+
+
+def auth_unverifiable(reason: str) -> Callable[[], tuple[bool, str]]:
+    """No documented non-interactive way to prove this CLI is signed in.
+
+    Excluded rather than assumed: admitting an unauthenticated CLI produces
+    routes that fail at dispatch.
+    """
+
+    def check() -> tuple[bool, str]:
+        return False, reason
+
+    return check
+
+
+def auth_grok() -> tuple[bool, str]:
+    """Grok has no status subcommand; its model list states the account."""
+    code, output = run(["grok", "models"], timeout=20)
+    if code != 0:
+        return False, "grok models failed"
+    for line in output.splitlines():
+        if "logged in" in line.lower():
+            return True, line.strip()[:80]
+    return False, "grok models did not report a signed-in account"
+
+
+def auth_t3() -> tuple[bool, str]:
+    """T3 keeps a session token beside its manifest."""
+    userdata = Path.home() / ".t3" / "userdata"
+    token = userdata / "clerk-tokens.json"
+    if not token.is_file():
+        return False, "no T3 session token in ~/.t3/userdata"
+    return True, "T3 session token present"
+
+
+def auth_always() -> tuple[bool, str]:
+    return True, "credential-scoped catalog"
+
+
 def probe_none(source: str) -> tuple[list[dict], list[dict], str | None]:
     """This harness or CLI publishes no model list.
 
@@ -385,6 +456,7 @@ def probe_none(source: str) -> tuple[list[dict], list[dict], str | None]:
 PROBES: tuple[dict[str, Any], ...] = (
     {
         "id": "omp",
+        "auth": auth_always,
         "binary": "omp",
         "harnessEnv": ("OMPCODE", "OMP_SESSION_ID", "PI_SESSION_ID"),
         "versionArgs": ["--version"],
@@ -392,6 +464,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "claude-code",
+        "auth": auth_claude,
         "binary": "claude",
         "harnessEnv": ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID"),
         "versionArgs": ["--version"],
@@ -399,6 +472,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "cursor",
+        "auth": auth_by_command(["cursor-agent", "status"]),
         "binary": "cursor-agent",
         "harnessEnv": ("CURSOR_AGENT", "CURSOR_TRACE_ID"),
         "versionArgs": ["--version"],
@@ -406,6 +480,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "grok",
+        "auth": auth_grok,
         "binary": "grok",
         "harnessEnv": ("GROK_SESSION_ID",),
         "versionArgs": ["--version"],
@@ -413,6 +488,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "codex",
+        "auth": auth_by_command(["codex", "login", "status"]),
         "binary": "codex",
         "harnessEnv": ("CODEX_SANDBOX", "CODEX_THREAD_ID"),
         "versionArgs": ["--version"],
@@ -420,6 +496,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "gemini",
+        "auth": auth_unverifiable("no documented non-interactive auth check"),
         "binary": "gemini",
         "harnessEnv": ("GEMINI_CLI", "GEMINI_SESSION_ID"),
         "versionArgs": ["--version"],
@@ -427,6 +504,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "t3",
+        "auth": auth_t3,
         "binary": "t3",
         "harnessEnv": ("T3_SESSION_ID", "T3_ENVIRONMENT_ID"),
         "versionArgs": ["--version"],
@@ -435,6 +513,7 @@ PROBES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "opencode",
+        "auth": auth_unverifiable("no documented non-interactive auth check"),
         "binary": "opencode",
         "harnessEnv": ("OPENCODE_CLIENT", "OPENCODE_SESSION_ID"),
         "versionArgs": ["--version"],
@@ -555,8 +634,25 @@ def scan() -> dict[str, Any]:
                 )
             continue
 
-        found, found_pools, note = probe["probe"](probe["id"])
         kind = "harness" if is_current else "cli-fallback"
+
+        # A CLI must prove it is signed in before its models count as routes.
+        signed_in, auth_note = probe["auth"]()
+        if not signed_in:
+            versions[probe["id"]] = version_of(probe)
+            sources.append(
+                {
+                    "id": probe["id"],
+                    "kind": kind,
+                    "status": "unauthenticated",
+                    "version": versions[probe["id"]],
+                    "routes": 0,
+                    "note": auth_note,
+                }
+            )
+            continue
+
+        found, found_pools, note = probe["probe"](probe["id"])
         for route in found:
             route["sourceKind"] = kind
         for pool in found_pools:
@@ -578,6 +674,7 @@ def scan() -> dict[str, Any]:
 
     routes.extend(_live_session_route(harness, routes, versions))
     _mark_fallbacks(routes)
+    _mark_harness_sufficiency(routes)
     routes.sort(
         key=lambda route: (route["sourceKind"] != "harness", route["source"], route["selector"])
     )
@@ -593,6 +690,7 @@ def scan() -> dict[str, Any]:
         "routes": routes,
         "pools": pools,
         "families": _families(routes),
+        "harnessSufficient": bool(routes) and routes[0].get("harnessSufficient", False),
     }
 
 
@@ -616,6 +714,24 @@ def _mark_fallbacks(routes: list[dict]) -> None:
             if route["family"] in in_harness
             else None
         )
+
+
+def _mark_harness_sufficiency(routes: list[dict]) -> None:
+    """Record whether the harness alone covers an independent-review gate.
+
+    When the current harness reaches two or more identifiable families it can
+    author and review on its own, so a CLI adds nothing but a second data route
+    and a hidden draw on someone else's meter. `agent-roles` reads this to skip
+    CLI routes entirely in that case.
+    """
+    harness_families = {
+        route["family"]
+        for route in routes
+        if route["sourceKind"] == "harness" and route["family"] != "unknown"
+    }
+    sufficient = len(harness_families) >= 2
+    for route in routes:
+        route["harnessSufficient"] = sufficient
 
 
 def _families(routes: list[dict]) -> dict[str, dict[str, list[str]]]:
