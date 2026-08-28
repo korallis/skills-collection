@@ -1,0 +1,530 @@
+#!/usr/bin/env python3
+"""Discover which models the current user can actually reach.
+
+Harness first, vendor CLIs only as a fallback. Writes one routes file that every
+skill reads, so no skill has to guess what is installed.
+
+    agent-routes scan     probe everything and write the routes file
+    agent-routes show     print the current routes file
+    agent-routes where    print the routes file path
+
+Adding a harness or a CLI means adding one PROBES entry. Nothing else changes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+SCHEMA_VERSION = 1
+DEFAULT_TIMEOUT = 25
+
+
+def routes_path() -> Path:
+    override = os.environ.get("AGENT_ROUTES_FILE")
+    if override:
+        return Path(override).expanduser()
+    root = os.environ.get("AGENT_SKILLS_HOME")
+    base = Path(root).expanduser() if root else Path.home() / ".agents"
+    return base / "routes.json"
+
+
+# --------------------------------------------------------------------------
+# Model family
+# --------------------------------------------------------------------------
+
+# Ordered: the first pattern that matches wins. `grok` precedes `composer`
+# because xAI ships `grok-composer-*`, which is Grok lineage; Cursor's bare
+# `composer-*` is its own lineage and must not be folded into GPT.
+FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"claude|sonnet|opus|haiku|fable|mythos", "claude"),
+    (r"gemini", "gemini"),
+    (r"grok", "grok"),
+    (r"composer", "composer"),
+    (r"kimi|moonshot", "kimi"),
+    (r"\bglm", "glm"),
+    (r"deepseek", "deepseek"),
+    (r"qwen", "qwen"),
+    (r"llama", "llama"),
+    (r"mistral|codestral|devstral", "mistral"),
+    (r"minimax", "minimax"),
+    (r"gpt|codex|^o[134]\b|davinci", "gpt"),
+)
+
+
+def family_of(model_id: str) -> str:
+    """Derive lineage from the model ID. Never from the harness or CLI name."""
+    lowered = model_id.lower()
+    for pattern, family in FAMILY_PATTERNS:
+        if re.search(pattern, lowered):
+            return family
+    return "unknown"
+
+
+# --------------------------------------------------------------------------
+# Shell
+# --------------------------------------------------------------------------
+
+
+def run(command: list[str], timeout: int = DEFAULT_TIMEOUT) -> tuple[int, str]:
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, f"timed out after {timeout}s"
+    except OSError as error:
+        # Which errno a missing binary raises is platform-dependent: macOS can
+        # report EACCES where Linux reports ENOENT. Ask the resolver instead.
+        if shutil.which(command[0]) is None:
+            return 127, "not installed"
+        return 1, str(error)
+    return completed.returncode, completed.stdout if completed.returncode == 0 else (
+        completed.stderr or completed.stdout
+    )
+
+
+def installed(binary: str) -> bool:
+    return shutil.which(binary) is not None
+
+
+# --------------------------------------------------------------------------
+# Probes
+#
+# A probe returns (routes, pools, note). It must never raise: an unreachable
+# source is a recorded fact, not a crash.
+# --------------------------------------------------------------------------
+
+
+def probe_omp(source: str) -> tuple[list[dict], list[dict], str | None]:
+    code, output = run(["omp", "models", "--json"])
+    if code != 0:
+        return [], [], f"catalog failed: {output.strip()[:200]}"
+
+    try:
+        entries = json.loads(output).get("models", [])
+    except json.JSONDecodeError as error:
+        return [], [], f"catalog was not JSON: {error}"
+
+    routes = []
+    for entry in entries:
+        model_id = entry.get("id", "")
+        provider = entry.get("provider", "")
+        routes.append(
+            {
+                "source": source,
+                "sourceKind": "harness",
+                "provider": provider,
+                "selector": entry.get("selector") or f"{provider}/{model_id}",
+                "modelId": model_id,
+                "family": family_of(model_id),
+                "pool": f"{source}:{provider}",
+                "contextWindow": entry.get("contextWindow"),
+                "maxOutput": entry.get("maxTokens"),
+                "reasoning": entry.get("reasoning"),
+                "thinkingLevels": entry.get("thinking"),
+                "discoveredBy": "omp models --json",
+            }
+        )
+
+    pools, note = _omp_pools(source)
+    return routes, pools, note
+
+
+def _omp_pools(source: str) -> tuple[list[dict], str | None]:
+    code, output = run(["omp", "usage", "--json", "--redact"])
+    if code != 0:
+        return [], f"usage unavailable, pools unknown: {output.strip()[:120]}"
+
+    try:
+        report = json.loads(output)
+    except json.JSONDecodeError as error:
+        return [], f"usage was not JSON: {error}"
+
+    generated_ms = report.get("generatedAt")
+    observed = (
+        datetime.fromtimestamp(generated_ms / 1000, timezone.utc)
+        if isinstance(generated_ms, (int, float))
+        else datetime.now(timezone.utc)
+    )
+    unusable = set(report.get("accountsWithoutUsage") or []) | set(
+        report.get("disabledCredentials") or []
+    )
+
+    pools = []
+    for provider, windows in (report.get("capacity") or {}).items():
+        for window in windows:
+            used = window.get("usedAccounts")
+            duration_ms = window.get("durationMs")
+            pools.append(
+                {
+                    "poolId": f"{source}:{provider}",
+                    "source": source,
+                    "provider": provider,
+                    "meter": window.get("meter"),
+                    "window": window.get("window"),
+                    "usedFraction": used,
+                    "remainingFraction": window.get("remainingAccounts"),
+                    "resetsAt": (
+                        (observed + timedelta(milliseconds=duration_ms)).isoformat()
+                        if isinstance(duration_ms, (int, float))
+                        else None
+                    ),
+                    "state": "blocked" if provider in unusable else _pool_state(used),
+                }
+            )
+    return pools, None
+
+
+def _pool_state(used_fraction: Any) -> str:
+    if not isinstance(used_fraction, (int, float)):
+        return "unknown"
+    if used_fraction >= 1:
+        return "exhausted"
+    if used_fraction >= 0.85:
+        return "constrained"
+    return "available"
+
+
+def _text_catalog(
+    source: str,
+    command: list[str],
+    parse: Callable[[str], Iterable[str]],
+    provider: str,
+) -> tuple[list[dict], list[dict], str | None]:
+    """Shared shape for CLIs that list models as plain text."""
+    code, output = run(command)
+    if code != 0:
+        return [], [], f"{' '.join(command)} failed: {output.strip()[:200]}"
+
+    routes = [
+        {
+            "source": source,
+            "sourceKind": "cli-fallback",
+            "provider": provider,
+            "selector": model_id,
+            "modelId": model_id,
+            "family": family_of(model_id),
+            "pool": f"{source}:{provider}",
+            "contextWindow": None,
+            "maxOutput": None,
+            "reasoning": None,
+            "thinkingLevels": None,
+            "discoveredBy": " ".join(command),
+        }
+        for model_id in parse(output)
+    ]
+    # No CLI here exposes a machine-readable account meter, so the pool is
+    # recorded unknown rather than guessed.
+    pool = [
+        {
+            "poolId": f"{source}:{provider}",
+            "source": source,
+            "provider": provider,
+            "meter": None,
+            "window": None,
+            "usedFraction": None,
+            "remainingFraction": None,
+            "resetsAt": None,
+            "state": "unknown",
+        }
+    ]
+    return routes, (pool if routes else []), "text catalog; quota not machine-readable"
+
+
+def _parse_cursor(output: str) -> list[str]:
+    models = []
+    for line in output.splitlines():
+        match = re.match(r"^\s*([A-Za-z0-9][\w.\-]*)\s+-\s+\S", line)
+        if match and match.group(1) != "auto":
+            models.append(match.group(1))
+    return models
+
+
+def _parse_grok(output: str) -> list[str]:
+    models = []
+    for line in output.splitlines():
+        match = re.match(r"^\s*[*\-]\s+([A-Za-z0-9][\w.\-]*)", line)
+        if match:
+            models.append(match.group(1))
+    return models
+
+
+def probe_cursor(source: str) -> tuple[list[dict], list[dict], str | None]:
+    return _text_catalog(source, ["cursor-agent", "models"], _parse_cursor, "cursor")
+
+
+def probe_grok(source: str) -> tuple[list[dict], list[dict], str | None]:
+    return _text_catalog(source, ["grok", "models"], _parse_grok, "xai")
+
+
+def probe_none(source: str) -> tuple[list[dict], list[dict], str | None]:
+    return [], [], "installed, but exposes no machine-readable model list"
+
+
+PROBES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "omp",
+        "binary": "omp",
+        "harnessEnv": ("OMPCODE", "OMP_SESSION_ID", "PI_SESSION_ID"),
+        "versionArgs": ["--version"],
+        "probe": probe_omp,
+    },
+    {
+        "id": "claude-code",
+        "binary": "claude",
+        "harnessEnv": ("CLAUDECODE", "CLAUDE_CODE_SESSION"),
+        "versionArgs": ["--version"],
+        "probe": probe_none,
+    },
+    {
+        "id": "cursor",
+        "binary": "cursor-agent",
+        "harnessEnv": ("CURSOR_AGENT", "CURSOR_SESSION_ID"),
+        "versionArgs": ["--version"],
+        "probe": probe_cursor,
+    },
+    {
+        "id": "grok",
+        "binary": "grok",
+        "harnessEnv": ("GROK_SESSION_ID",),
+        "versionArgs": ["--version"],
+        "probe": probe_grok,
+    },
+    {
+        "id": "codex",
+        "binary": "codex",
+        "harnessEnv": ("CODEX_SANDBOX", "CODEX_SESSION_ID"),
+        "versionArgs": ["--version"],
+        "probe": probe_none,
+    },
+    {
+        "id": "gemini",
+        "binary": "gemini",
+        "harnessEnv": ("GEMINI_CLI", "GEMINI_SESSION_ID"),
+        "versionArgs": ["--version"],
+        "probe": probe_none,
+    },
+    {
+        "id": "opencode",
+        "binary": "opencode",
+        "harnessEnv": ("OPENCODE_SESSION_ID",),
+        "versionArgs": ["--version"],
+        "probe": probe_none,
+    },
+)
+
+
+# --------------------------------------------------------------------------
+# Harness detection
+# --------------------------------------------------------------------------
+
+
+def detect_harness() -> dict[str, Any]:
+    """Identify the harness running this process.
+
+    Env wins over an installed binary: several harnesses ship compatibility
+    variables for each other, so PROBES order breaks the tie. omp sets both
+    OMPCODE and CLAUDECODE, and is listed first for exactly that reason.
+    """
+    for probe in PROBES:
+        for variable in probe["harnessEnv"]:
+            if os.environ.get(variable):
+                return {
+                    "id": probe["id"],
+                    "version": version_of(probe),
+                    "detectedBy": f"{variable} environment variable",
+                }
+    return {"id": "unknown", "version": None, "detectedBy": "no harness marker found"}
+
+
+def version_of(probe: dict[str, Any]) -> str | None:
+    if not installed(probe["binary"]):
+        return None
+    code, output = run([probe["binary"], *probe["versionArgs"]], timeout=10)
+    return output.strip().splitlines()[0] if code == 0 and output.strip() else None
+
+
+# --------------------------------------------------------------------------
+# Scan
+# --------------------------------------------------------------------------
+
+
+def scan() -> dict[str, Any]:
+    harness = detect_harness()
+    sources: list[dict] = []
+    routes: list[dict] = []
+    pools: list[dict] = []
+
+    for probe in PROBES:
+        is_current = probe["id"] == harness["id"]
+        if not installed(probe["binary"]):
+            if is_current:
+                sources.append(
+                    {
+                        "id": probe["id"],
+                        "kind": "harness",
+                        "status": "unavailable",
+                        "note": "current harness, but its binary is not on PATH",
+                    }
+                )
+            continue
+
+        found, found_pools, note = probe["probe"](probe["id"])
+        kind = "harness" if is_current else "cli-fallback"
+        for route in found:
+            route["sourceKind"] = kind
+        for pool in found_pools:
+            pool["kind"] = kind
+
+        sources.append(
+            {
+                "id": probe["id"],
+                "kind": kind,
+                "status": "ok" if found else "no-routes",
+                "version": version_of(probe),
+                "routes": len(found),
+                "note": note,
+            }
+        )
+        routes.extend(found)
+        pools.extend(found_pools)
+
+    _mark_fallbacks(routes)
+    routes.sort(key=lambda route: (route["sourceKind"] != "harness", route["source"], route["selector"]))
+
+    for index, route in enumerate(routes, start=1):
+        route["routeId"] = f"r{index:03d}"
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "scannedAt": datetime.now(timezone.utc).isoformat(),
+        "harness": harness,
+        "sources": sources,
+        "routes": routes,
+        "pools": pools,
+        "families": _families(routes),
+    }
+
+
+def _mark_fallbacks(routes: list[dict]) -> None:
+    """A CLI route is redundant when the harness already reaches that family.
+
+    This is what makes CLIs a fallback rather than a peer: reaching the same
+    family through a second process adds a data route and a second draw on a
+    meter without adding capability.
+    """
+    in_harness = {
+        route["family"] for route in routes if route["sourceKind"] == "harness"
+    }
+    for route in routes:
+        if route["sourceKind"] != "cli-fallback":
+            route["preferOver"] = None
+            continue
+        route["preferOver"] = (
+            "harness already reaches this family; use the CLI only for a capability "
+            "the harness cannot provide"
+            if route["family"] in in_harness
+            else None
+        )
+
+
+def _families(routes: list[dict]) -> dict[str, dict[str, list[str]]]:
+    summary: dict[str, dict[str, list[str]]] = {}
+    for route in routes:
+        entry = summary.setdefault(route["family"], {"harness": [], "fallback": []})
+        bucket = "harness" if route["sourceKind"] == "harness" else "fallback"
+        if route["pool"] not in entry[bucket]:
+            entry[bucket].append(route["pool"])
+    return summary
+
+
+# --------------------------------------------------------------------------
+# Presentation
+# --------------------------------------------------------------------------
+
+
+def summarise(report: dict[str, Any]) -> str:
+    lines = [
+        f"harness    {report['harness']['id']} "
+        f"({report['harness'].get('version') or 'version unknown'})",
+        f"scanned    {report['scannedAt']}",
+        "",
+        "sources",
+    ]
+    for source in report["sources"]:
+        note = f"  {source['note']}" if source.get("note") else ""
+        lines.append(
+            f"  {source['id']:<12} {source['kind']:<13} {source['status']:<12}"
+            f" {source.get('routes', 0):>4} routes{note}"
+        )
+
+    lines += ["", "families                harness pools / fallback pools"]
+    for family, pools in sorted(report["families"].items()):
+        lines.append(
+            f"  {family:<12} {', '.join(pools['harness']) or '-':<34}"
+            f" {', '.join(pools['fallback']) or '-'}"
+        )
+
+    metered = [pool for pool in report["pools"] if pool.get("usedFraction") is not None]
+    if metered:
+        lines += ["", "pools"]
+        for pool in metered:
+            lines.append(
+                f"  {pool['poolId']:<22} {str(pool.get('meter') or '-'):<22}"
+                f" {pool.get('window') or '-':<8}"
+                f" {pool['usedFraction'] * 100:5.1f}% used  {pool['state']}"
+            )
+
+    unknown = [pool for pool in report["pools"] if pool.get("usedFraction") is None]
+    if unknown:
+        lines.append("")
+        lines.append(
+            "  unmetered pools (schedule one small packet, then re-check): "
+            + ", ".join(sorted({pool["poolId"] for pool in unknown}))
+        )
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("action", choices=("scan", "show", "where"), nargs="?", default="scan")
+    parser.add_argument("--json", action="store_true", help="emit JSON instead of a summary")
+    arguments = parser.parse_args(argv)
+
+    target = routes_path()
+
+    if arguments.action == "where":
+        print(target)
+        return 0
+
+    if arguments.action == "show":
+        if not target.is_file():
+            print(f"no routes file at {target}; run: agent-routes scan", file=sys.stderr)
+            return 1
+        report = json.loads(target.read_text(encoding="utf-8"))
+    else:
+        report = scan()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(json.dumps(report, indent=2, sort_keys=True) if arguments.json else summarise(report))
+    if arguments.action == "scan" and not arguments.json:
+        print(f"\nwritten to {target}")
+    return 0 if report["routes"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

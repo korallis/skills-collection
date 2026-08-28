@@ -1,0 +1,78 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/test_bin.py
+
+      - name: Executables are syntactically valid
+        run: |
+          python3 -m py_compile bin/agent-routes bin/agent-skills
+          sh -n lee-engineering/scripts/lee-grok
+          sh -n lee-engineering/scripts/lee-grok-review
+          sh -n lee-engineering/scripts/lee-cursor-grok
+
+      - name: Scan runs on a machine with no harness and no vendor CLI
+        env:
+          AGENT_ROUTES_FILE: ${{ runner.temp }}/routes.json
+        run: |
+          # Exit 1 means "no routes found", which is correct here and must not
+          # be a crash. Anything else is a real failure.
+          python3 bin/agent-routes scan && status=0 || status=$?
+          if [ "$status" -gt 1 ]; then
+            echo "scan crashed with status $status" >&2
+            exit 1
+          fi
+          python3 -c "import json,os,sys; r=json.load(open(os.environ['AGENT_ROUTES_FILE'])); sys.exit(0 if r['schemaVersion']==1 else 1)"
+
+      - name: Linking is idempotent and leaves one source of truth
+        run: |
+          root=$(mktemp -d)
+          python3 bin/agent-skills link --root "$root" >/dev/null
+          python3 bin/agent-skills link --root "$root" --json > second.json
+          python3 - <<'PY'
+          import json
+          actions = json.load(open("second.json"))["actions"]
+          changed = [a for a in actions if a["action"] != "already-linked"]
+          assert not changed, f"second link was not a no-op: {changed}"
+          PY
+          find "$root" -maxdepth 1 -mindepth 1 ! -type l -print -quit | grep -q . \
+            && { echo "non-symlink entry in skill root" >&2; exit 1; } || true
+
+      - name: Every skill declares a name matching its directory
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          bad = []
+          for skill in sorted(pathlib.Path(".").glob("*/SKILL.md")):
+              name = skill.parent.name
+              text = skill.read_text(encoding="utf-8")
+              if not re.search(rf"^name:\s*{re.escape(name)}\s*$", text, re.M):
+                  bad.append(name)
+          if bad:
+              print("SKILL.md name does not match directory:", ", ".join(bad), file=sys.stderr)
+              sys.exit(1)
+          print("all skill names match their directories")
+          PY

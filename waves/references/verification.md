@@ -124,15 +124,16 @@ Make the verifier's job robust:
   the staged data?"), instruct the verifier to match against the reference only
   and not inject outside knowledge -- strong models over-reason on what is
   essentially entailment checking.
-- Different model (optional, strongest): a same-model verifier can self-prefer
+- Different family (optional, strongest): a same-family verifier can self-prefer
   even with an isolated context -- models recognize and favor their own output,
   and the more capable the model, the stronger the effect. For the
-  highest-stakes calls, ask the user for a different model family as the
-  verifier; a small panel of judges from disjoint model families (majority vote
-  on binary verdicts, average on scores) beat a single frontier judge on human
+  highest-stakes calls, pick a reviewer/verifier route whose `family` differs
+  from the author's. Read `family` from `~/.agents/routes.json` written by
+  `bin/agent-routes scan`, preferring `sourceKind: harness`; never guess model
+  slugs. A small panel of judges from disjoint families (majority vote on
+  binary verdicts, average on scores) beat a single frontier judge on human
   agreement while cutting intra-model bias and cost. (Planned as a default in a
-  later version pending testing; for now an opt-in escalation - don't guess
-  model slugs.)
+  later version pending testing; for now an opt-in escalation.)
 
 The verifier returns:
 
@@ -141,9 +142,10 @@ The verifier returns:
 - `unsupported`
 - `source-not-found`
 
-For many claims, prefer `spawn_agents_on_csv` when available: one row per claim,
-fixed JSON result via `report_agent_job_result`. If unavailable, spawn normal
-custom `verifier` agents in bounded waves.
+For many claims, if the harness has a batch or CSV spawn, use it: one row per
+claim, one verifier worker per row. Otherwise spawn one verifier worker per
+claim in bounded waves. Respect the harness worker concurrency cap; if unknown,
+batch 3-8.
 
 ## 5. Measure and Cross-Check
 
@@ -167,12 +169,13 @@ Prefer direct oracles over prose review:
   of the cost); the verifier does not need to be frontier-class when it has an
   oracle to consult.
 - Panel / multi-pass cross-check: for a high-stakes or contested claim, run it
-  across several independent passes (or different models, if the user approves)
-  and synthesize consensus vs lone-result. That extra spawning is worth it for
-  claims the deliverable hinges on.
+  across several independent passes (or routes whose `family` differs, from the
+  scan) and synthesize consensus vs lone-result. That extra spawning is worth it
+  for claims the deliverable hinges on.
 
-For docs/current behavior, use primary sources first. For Codex/OpenAI details,
-prefer `developers.openai.com/codex` and current local CLI/tool behavior.
+For docs/current behavior, use primary sources first. For current product or API
+behavior, prefer that vendor's primary docs and live tools; do not special-case
+any one vendor CLI as this skill's runtime.
 
 ## 6. Verify the Deliverable
 
@@ -198,14 +201,26 @@ Escalation order:
 
 1. Re-task narrower.
 2. Spawn a verifier.
-3. Use a higher-reasoning verifier.
-4. Ask the user (who may pick a stronger model). Mark the limitation explicitly
+3. Use a higher-capability reviewer/verifier route from the scan.
+4. Ask the user. Mark the limitation explicitly
    only as a last resort, after re-tasking and verifier passes are exhausted.
 
 Never launder low confidence into confident prose. Final claims should be marked
 `verified`, `single-sourced`, or `unverified` when the distinction matters.
 
-## Codex-Native Verification Surfaces
+## Harness-Agnostic Verification Surfaces
+
+- A read-only verifier or explorer worker for local source checks.
+- Docs, web, or MCP tools for current sources.
+- Row-shaped verifier batches if the harness has them; otherwise one verifier
+  worker per claim.
+- Tests, validators, shell commands, browser checks, and direct file reads.
+- The harness's code-review surface if present.
+
+Do not assume the harness auto-grades handoffs. Treat verifier workers and
+external oracles as the portable path.
+
+## Example: Codex verification surfaces
 
 - `explorer` or a custom read-only `verifier` agent for local source checks.
 - `default` or custom docs researcher for current docs/web/MCP source checks.
@@ -215,10 +230,6 @@ Never launder low confidence into confident prose. Final claims should be marked
 - Codex `/review` and GitHub code review for code-risk review.
 - `approvals_reviewer = "auto_review"` for approval/security review only. It
   does not verify arbitrary claims.
-
-Current public docs checked on 2026-06-14 do not confirm a general Codex
-claim-verification, eval, or critic hook that automatically grades subagent
-handoffs. Treat verifier agents and external oracles as the portable path.
 
 ## Grounding (Sources for the Techniques Above)
 

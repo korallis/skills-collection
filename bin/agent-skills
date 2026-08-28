@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Install this collection once, and point every harness at that one copy.
+
+Skills live in exactly one place: the clone you are running this from. Every
+harness skill root becomes a symlink into it, so an edit is visible everywhere
+immediately and no root can silently drift.
+
+    agent-skills link      symlink every skill into every harness root found
+    agent-skills status    show what each root points at, and flag drift
+    agent-skills unlink    remove links this tool created
+
+Add `--root PATH` to target an extra skill root, `--dry-run` to preview.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+from typing import Any
+
+# Not skills: repository furniture and shared tooling.
+NON_SKILL_ENTRIES = {"bin", "commands", "licenses", ".git", ".github"}
+
+# Harness skill roots, in the order they were added. `~/.agents/skills` is the
+# cross-agent convention and is always used; the rest are created only when the
+# harness that owns them already exists on this machine.
+HARNESS_ROOTS: tuple[tuple[str, str | None], ...] = (
+    ("~/.agents/skills", None),
+    ("~/.claude/skills", "~/.claude"),
+    ("~/.cursor/skills", "~/.cursor"),
+    ("~/.codex/skills", "~/.codex"),
+    ("~/.factory/skills", "~/.factory"),
+    ("~/.grok/skills", "~/.grok"),
+    ("~/.gemini/skills", "~/.gemini"),
+)
+
+# Slash commands are deliberately not shipped. Cursor, Claude Code, Codex and
+# Gemini CLI all invoke a skill as `/<skill-name>`, and Cursor and Claude Code
+# have merged their command primitive into skills. A skill is therefore the only
+# portable form, so `setup-lee-engineering` is a skill rather than a command file.
+
+
+def collection_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def skill_directories(root: Path) -> list[Path]:
+    return sorted(
+        entry
+        for entry in root.iterdir()
+        if entry.is_dir()
+        and entry.name not in NON_SKILL_ENTRIES
+        and not entry.name.startswith(".")
+        and (entry / "SKILL.md").is_file()
+    )
+
+
+def target_roots(
+    candidates: tuple[tuple[str, str | None], ...], extra: list[str]
+) -> list[Path]:
+    """A root is a target when its owning harness exists, or it already does.
+
+    This is why nothing is created for a harness the user does not have.
+    """
+    roots = []
+    for candidate, owner in candidates:
+        path = Path(candidate).expanduser()
+        owner_path = Path(owner).expanduser() if owner else None
+        if owner_path is None or owner_path.is_dir() or path.is_dir():
+            roots.append(path)
+    roots.extend(Path(item).expanduser() for item in extra)
+    seen: set[Path] = set()
+    return [root for root in roots if not (root in seen or seen.add(root))]
+
+
+def classify(link: Path, expected: Path) -> str:
+    if not link.exists() and not link.is_symlink():
+        return "missing"
+    if link.is_symlink():
+        return "linked" if link.resolve() == expected.resolve() else "linked-elsewhere"
+    return "copy"
+
+
+def link(roots: list[Path], sources: list[Path], dry_run: bool) -> list[dict[str, Any]]:
+    actions = []
+    for root in roots:
+        for source in sources:
+            destination = root / source.name
+            state = classify(destination, source)
+            if state == "linked":
+                actions.append({"path": str(destination), "action": "already-linked"})
+                continue
+
+            action = "replace-copy" if state == "copy" else (
+                "relink" if state == "linked-elsewhere" else "link"
+            )
+            actions.append({"path": str(destination), "action": action, "target": str(source)})
+            if dry_run:
+                continue
+
+            root.mkdir(parents=True, exist_ok=True)
+            if destination.is_symlink() or destination.is_file():
+                destination.unlink()
+            elif destination.is_dir():
+                shutil.rmtree(destination)
+            destination.symlink_to(source, target_is_directory=source.is_dir())
+    return actions
+
+
+def unlink(roots: list[Path], sources: list[Path], dry_run: bool) -> list[dict[str, Any]]:
+    names = {source.name for source in sources}
+    actions = []
+    for root in roots:
+        for name in sorted(names):
+            destination = root / name
+            if not destination.is_symlink():
+                continue
+            actions.append({"path": str(destination), "action": "unlink"})
+            if not dry_run:
+                destination.unlink()
+    return actions
+
+
+def status(roots: list[Path], sources: list[Path]) -> list[dict[str, Any]]:
+    report = []
+    for root in roots:
+        states: dict[str, int] = {}
+        for source in sources:
+            state = classify(root / source.name, source)
+            states[state] = states.get(state, 0) + 1
+        report.append({"root": str(root), "states": states})
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("action", choices=("link", "status", "unlink"), nargs="?", default="status")
+    parser.add_argument("--root", action="append", default=[], help="extra skill root")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    arguments = parser.parse_args(argv)
+
+    root = collection_root()
+    skills = skill_directories(root)
+    if not skills:
+        print(f"agent-skills: no skills found under {root}", file=sys.stderr)
+        return 1
+
+    groups = [("skills", target_roots(HARNESS_ROOTS, arguments.root), skills)]
+
+    if arguments.action == "status":
+        report = {
+            label: status(roots, sources) for label, roots, sources in groups
+        }
+        if arguments.json:
+            print(json.dumps({"source": str(root), "groups": report}, indent=2))
+            return 0
+        print(f"source   {root}\n")
+        drifted = False
+        for label, _, sources in groups:
+            print(f"{label} ({len(sources)})")
+            for entry in report[label]:
+                summary = ", ".join(
+                    f"{count} {state}" for state, count in sorted(entry["states"].items())
+                )
+                print(f"  {entry['root']:<34} {summary}")
+                drifted = drifted or any(
+                    state in ("copy", "linked-elsewhere") for state in entry["states"]
+                )
+            print()
+        if drifted:
+            print("copies and foreign links drift from the source; run: agent-skills link")
+        return 0
+
+    operation = link if arguments.action == "link" else unlink
+    actions = [
+        item
+        for _, roots, sources in groups
+        for item in operation(roots, sources, arguments.dry_run)
+    ]
+    if arguments.json:
+        print(json.dumps({"source": str(root), "dryRun": arguments.dry_run, "actions": actions}, indent=2))
+        return 0
+
+    changed = [item for item in actions if item["action"] != "already-linked"]
+    for item in changed:
+        print(f"  {item['action']:<14} {item['path']}")
+    verb = "would change" if arguments.dry_run else "changed"
+    print(f"\n{verb} {len(changed)} of {len(actions)} entries")
+    print(f"source of truth: {root}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

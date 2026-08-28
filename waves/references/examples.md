@@ -33,16 +33,17 @@ counts and date ranges, fix a timestamp-sort issue, then fan out.
 - 3 research workers: realtime voice stack, Notion/platform SDK, iOS/on-device
   options.
 
-### Step 2 - Fan Out with Codex Subagents
+### Step 2 - Fan Out with Harness Workers
 
 Use explicit manager wording:
 
 ```text
-Spawn 12 Codex subagents in parallel and wait for all of them before synthesis.
-Use explorer agents for the 8 read-only message chunks and workspace reader.
-Use docs/research-capable agents for the 3 stack research streams. Each worker
-must return the research/analysis handoff format from references/handoff-format.md,
-including Coverage and Confidence & verification sections.
+Spawn 12 workers in parallel the way this harness dispatches workers, and wait
+for all of them before synthesis. Use explorer roles for the 8 read-only
+message chunks and workspace reader. Use research roles for the 3 stack
+research streams. Each worker must return the research/analysis handoff
+format from references/handoff-format.md, including Coverage and
+Confidence & verification sections.
 ```
 
 Example data worker prompt:
@@ -111,16 +112,18 @@ into understanding + plan + subtasks.
    pipeline?).
 2. Reduce it cheaply. Dig locally (read the repo, package manifest, existing
    scaffolding). For anything the repo cannot answer, spawn a small scouting wave
-   (one `explorer` per candidate engine/framework) on a fast low-effort model,
-   and verify. State assumptions for specification gaps ("web canvas, vanilla TS,
-   one screen + score") instead of blocking -- ask only the one question whose
-   answer would change the whole plan.
+   (one `explorer` per candidate engine/framework) on a cheaper/faster harness
+   route from `~/.agents/routes.json` written by `bin/agent-routes scan`
+   (prefer `sourceKind: harness`), and verify. State assumptions for
+   specification gaps ("web canvas, vanilla TS, one screen + score") instead of
+   blocking -- ask only the one question whose answer would change the whole
+   plan.
 3. Decompose least-to-most. The plan is now low-entropy: game loop -> render
    pipes/bird -> input + gravity -> collision -> score/state -> polish.
    First-order subtasks first; each verified piece lowers uncertainty for the
    next.
 4. Execute in waves. Build with disjoint-ownership `worker`s (or serially -- see
-   "Parallel Writes in Codex"), verify the artifact, and open another scouting
+   "Parallel Writes"), verify the artifact, and open another scouting
    sub-wave only where a subtask is still high-entropy.
 
 ## Recipe: Data-Chunk Fan-Out
@@ -131,13 +134,35 @@ analytics rows.
 1. Discover total size and schema.
 2. Split into disjoint ranges or files.
 3. Verify total count, per-slice bounds, gaps/overlaps, and partition sum.
-4. Spawn one `explorer` per chunk, or use `spawn_agents_on_csv` when one row maps
-   cleanly to one worker.
+4. Spawn one `explorer` per chunk. If the harness has a row-shaped batch spawn,
+   use it; otherwise one worker per row.
 5. Require coverage and evidence identifiers in every finding.
 6. Merge into themes, counts, outliers, and follow-ups; spawn a focused second
    wave for the follow-ups that change the deliverable.
 
 CSV-shaped prompt:
+
+```text
+Create /tmp/messages.csv with columns chunk_id, start_id, end_id, db_path.
+Then use a row-shaped batch spawn if the harness has one; otherwise one worker
+per row. Each worker analyzes messages {start_id}-{end_id} in {db_path} and
+returns JSON with status, scope, coverage, key_findings, sources,
+confidence_and_verification, open_questions, and suggested_follow_ups.
+```
+
+Verifier pass:
+
+```text
+Create /tmp/claims.csv with columns claim_id, claim, sources, acceptance_question.
+Then use a row-shaped batch spawn if the harness has one; otherwise one worker
+per row. Each worker verifies claim {claim_id}: {claim}, checks only {sources},
+answers {acceptance_question}, and returns JSON with verdict, evidence,
+source_status, correction, confidence, and gaps.
+```
+
+### Example: Codex spawn_agents_on_csv
+
+One harness's syntax for the same CSV column design:
 
 ```text
 Create /tmp/messages.csv with columns chunk_id, start_id, end_id, db_path.
@@ -151,8 +176,6 @@ Then use spawn_agents_on_csv if available:
 - output_csv_path: /tmp/message-analysis-results.csv
 - max_concurrency: 6
 ```
-
-Verifier pass:
 
 ```text
 Create /tmp/claims.csv with columns claim_id, claim, sources, acceptance_question.
@@ -217,7 +240,7 @@ Safer patterns:
 - One `worker` owns frontend components, another owns backend API, another owns
   tests.
 - One worktree per competing implementation.
-- One `codex exec` process per git worktree for scripted attempts.
+- One isolated worker process per git worktree for scripted attempts.
 - One verifier or reviewer pass checks the merged result before final delivery.
 
 Risky patterns:
@@ -237,15 +260,17 @@ The end-to-end SWE shape -- three waves with different jobs:
 2. Wave B -- disjoint edits. One `worker` per plan subtask with strictly
    disjoint path sets (or one worktree per competing design). Each prompt
    carries the plan excerpt for its subtask, its exact paths, the "you are not
-   alone" warning, and the code/edit handoff format. Use `high` effort.
+   alone" warning, and the code/edit handoff format. Pick a capable coding
+   route from `~/.agents/routes.json` written by `bin/agent-routes scan`
+   (prefer `sourceKind: harness`).
 3. Wave C -- verify. Read-only workers run the oracles: tests, type checks,
    lint, a reviewer pass over the combined diff, regression checks on sibling
    routes. Route failures back as narrow fix tasks (bounded -- don't loop).
    The manager merges, re-reads critical files, and delivers.
 
 Interleave cheaply: Wave C slices that only touch Wave B's finished subtasks
-can start while slower edits finish. Keep the plan in `update_plan` and the
-per-subtask status in the wave manifest.
+can start while slower edits finish. Keep the plan in the harness plan/todo
+surface and the per-subtask status in the wave manifest.
 
 ## Recipe: Codemod / Migration Across Many Files (Row-Shaped)
 
@@ -255,9 +280,10 @@ swap a client, migrate a schema field):
 1. Stage the target list. Grep/list the exact targets into
    `.waves/<run>/targets.csv` (path, symbol, line hints). Verify the count --
    the list is the coverage gate.
-2. Fan out the edits: `spawn_agents_on_csv` with one row per target (or
-   batches of 3-8 `worker`s each owning a disjoint file subset when the CSV
-   tool is unavailable); prompts point at list rows, not pasted code.
+2. Fan out the edits: if the harness has a row-shaped batch spawn, use it with
+   one row per target; otherwise one worker per row (or batches of 3-8
+   `worker`s each owning a disjoint file subset); prompts point at list rows,
+   not pasted code.
 3. Verify by oracle, not prose: after each batch, re-run the grep (old
    pattern count must fall to the expected residue), then tests/type checks.
    A row-shaped run with a cheap oracle is the one place going wider than
@@ -280,8 +306,10 @@ A wave is not one move - pick the shape from how much you know about the problem
   goal is vague or high-entropy ("build a Flappy Bird game", "make it faster"),
   the first wave's job is to reduce uncertainty, not build. Dig locally, then fan
   a small scouting wave at the unknowns (stack, constraints, current APIs, repo
-  shape) on a fast low-effort model, verify, and only then decompose the
-  low-entropy version into the execution wave. See "Entropy-First Decomposition."
+  shape) on a cheaper/faster harness route from `~/.agents/routes.json` written
+  by `bin/agent-routes scan` (prefer `sourceKind: harness`), verify, and only
+  then decompose the low-entropy version into the execution wave. See
+  "Entropy-First Decomposition."
 - Exploratory wave (you don't know the shape yet): when the space is unmapped
   (QA, an unfamiliar repo, "what's wrong here?"), send a broad first wave - many
   workers probing different surfaces/flows at once. Its job is to find the edges,
@@ -317,10 +345,9 @@ wave yourself, or let the verifier gate it automatically.
 - Skip re-reading critical files you wrote.
 - Stop after one wave when handoffs surfaced real, deliverable-changing
   follow-ups. Multi-wave (`12 + 3 + 1`) is the expected shape, not one burst.
-- Treat `agents.max_depth > 1` as a default. Recursive fan-out (workers spawning
-  their own workers) is expensive and unpredictable -- but this caps recursion
-  only; the manager launching sequential second and third waves at depth 1 is
-  encouraged, not capped.
+- Do not recurse by default (workers spawning workers). Recursive fan-out is
+  expensive and unpredictable. Manager-driven sequential waves are encouraged,
+  not capped.
 - Assume parallel writes automatically merge. Use disjoint ownership or
   worktrees.
 - Forward raw handoffs as the final answer.
