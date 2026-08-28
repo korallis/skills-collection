@@ -25,10 +25,16 @@ Use this rubric:
 
 ## Consult independently
 
-Use harness-native local subagents. When installed and practical, run genuine read-only reviews with
-separate local model-family CLIs such as Codex and Grok. Never simulate or label a reviewer as a model
-that did not actually run. Keep reviewers isolated until their first verdict, and do not let review
-agents edit, push, merge, deploy, or contact people.
+Dispatch reviewers as harness-native subagents, read-only. For model choice, read
+`~/.agents/routing.json` (written by the `setup-lee-engineering` skill): reviewers run on the
+`review` and `verify` roles, which setup guarantees sit in a different model family from the
+author's. No routing file, or a role with no assignment, means review on the current model and say
+so — same-model review is a weaker gate, not a fake independent one. A separately installed model
+CLI is an optional extra reviewer, never a requirement.
+
+Never simulate or label a reviewer as a model that did not actually run; read the model back from
+the run result, not from the request. Keep reviewers isolated until their first verdict, and do not
+let review agents edit, push, merge, deploy, or contact people.
 
 ## Aggregate with lead judgment
 

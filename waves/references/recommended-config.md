@@ -12,6 +12,19 @@ the chosen `routeId` from the scan, and the required return shape from
 [handoff-format.md](handoff-format.md). Track the plan on the harness
 plan/todo surface.
 
+## Contents
+
+- Parallel workers
+- Per-worker route selection
+- Return contract
+- Tool restrictions
+- Web and docs access
+- Isolated writes
+- Role defaults
+- Verification defaults
+- Skill install
+- Appendix: Codex configuration examples (optional, one harness)
+
 ## Parallel workers
 
 The runner MUST support parallel workers with bounded concurrency.

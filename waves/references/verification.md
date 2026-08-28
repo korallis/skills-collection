@@ -14,6 +14,19 @@ facts with sources, citations, generated files, deployments, and metrics. For
 taste or judgment, verify the sub-claims and evidence; do not fake a crisp grade
 for subjective preference.
 
+## Contents
+
+- 1. Verify Before You Spawn
+- 2. Cheap Checks on Every Handoff
+- 3. Push Self-Checks Into Worker Prompts
+- 4. Use Dedicated Verifier Workers
+- 5. Measure and Cross-Check
+- 6. Verify the Deliverable
+- 7. Acceptance and Escalation
+- Harness-Agnostic Verification Surfaces
+- Example: Codex verification surfaces
+- Grounding (Sources for the Techniques Above)
+
 ## 1. Verify Before You Spawn
 
 Run a pre-fan-out gate after discovery/staging and before delegation:

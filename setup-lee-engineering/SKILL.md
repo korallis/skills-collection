@@ -108,7 +108,7 @@ The ranking is a heuristic and will sometimes be wrong. Pin a role in
 `~/.agents/roles.overrides.json` and it wins on every re-run:
 
 ```json
-{ "review": "anthropic/claude-opus-5" }
+{ "review": "<a selector present in the scan>" }
 ```
 
 A pin naming a model the scan did not find is ignored and reported.

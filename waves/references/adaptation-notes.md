@@ -5,6 +5,14 @@ portable `waves` skill. They exist so future edits keep the WAVE methodology
 and do not reintroduce Cursor plumbing or any single-harness worker API as a
 requirement.
 
+## Contents
+
+- Origin
+- What Stayed Portable
+- Harness-Agnostic Swaps
+- Why the Final Skill Is Opinionated
+- Historical notes and Codex port details (not requirements)
+
 ## Origin
 
 Ray Fernando's WAVES skill (Workers, Aggregate, Verify, Extend) was published
